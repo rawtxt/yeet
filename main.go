@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -91,7 +92,9 @@ func runSender(pc *webrtc.PeerConnection) {
 }
 
 func runReceiver(pc *webrtc.PeerConnection) {
+	var once sync.Once
 	doneChan := make(chan struct{})
+
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		fmt.Println("Received Data Channel", dc.Label())
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -103,10 +106,16 @@ func runReceiver(pc *webrtc.PeerConnection) {
 					for dc.BufferedAmount() > 0 {
 						time.Sleep(1 * time.Millisecond)
 					}
-					close(doneChan)
+					once.Do(func() { close(doneChan) })
 				}()
 			}
 		})
+	})
+
+	pc.OnConnectionStateChange(func(pcs webrtc.PeerConnectionState) {
+		if pcs == webrtc.PeerConnectionStateClosed {
+			once.Do(func() { close(doneChan) })
+		}
 	})
 
 	fmt.Printf("Enter sender token: ")
