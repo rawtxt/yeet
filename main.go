@@ -5,25 +5,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-
-	"github.com/pion/webrtc/v4"
 )
 
 func main() {
-	config := webrtc.Configuration{
-		ICEServers: []webrtc.ICEServer{
-			{
-				URLs: []string{"stun:stun.l.google.com:19302"},
-			},
-		},
-	}
-
-	pc, err := webrtc.NewPeerConnection(config)
-	if err != nil {
-		panic(err)
-	}
-	defer pc.Close()
-
 	switch role := os.Args[1]; role {
 	case "send":
 		fmt.Printf("Enter session ID: ")
