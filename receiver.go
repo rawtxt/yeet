@@ -68,6 +68,10 @@ func (r *Receiver) TransferRequest() <-chan TransferRequest {
 	return r.transferRequestChan
 }
 
+func (r *Receiver) Accept(tr TransferRequest) error {
+	return r.dc.SendText(fmt.Sprintf("accept %q", tr.FileName))
+}
+
 func initSession(pc *webrtc.PeerConnection) (SessionID, error) {
 	desc := encodeSDP(*pc.LocalDescription())
 	fmt.Println("receiver token:", desc)
