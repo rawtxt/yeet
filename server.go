@@ -1,10 +1,12 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
+	mrand "math/rand/v2"
 	"net/http"
 	"sync"
 	"time"
@@ -12,6 +14,7 @@ import (
 
 type Session struct {
 	ID            string
+	SecretToken   string
 	ReceiverToken string
 	EventChan     chan string
 	ApprovedChan  chan bool
@@ -40,6 +43,14 @@ func (s *SignallingServer) Start(addr string) error {
 	return http.ListenAndServe(addr, mux)
 }
 
+func generateSecretToken() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic(err) // crypto/rand shouldn't fail
+	}
+	return hex.EncodeToString(b)
+}
+
 func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -58,14 +69,16 @@ func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request
 	// Generate a unique 6-digit session ID
 	var sessionID string
 	for {
-		sessionID = fmt.Sprintf("%06d", rand.Intn(1000000))
+		sessionID = fmt.Sprintf("%06d", mrand.IntN(1000000))
 		if _, exists := s.sessions[sessionID]; !exists {
 			break
 		}
 	}
 
+	secretToken := generateSecretToken()
 	session := &Session{
 		ID:            sessionID,
+		SecretToken:   secretToken,
 		ReceiverToken: req.ReceiverToken,
 		EventChan:     make(chan string, 10),
 		ApprovedChan:  make(chan bool, 1),
@@ -73,18 +86,20 @@ func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request
 	s.sessions[sessionID] = session
 	s.mu.Unlock()
 
-	log.Printf("[Server] Registered session %s\n", sessionID)
+	log.Printf("[Server] Registered session %s (secure token generated)\n", sessionID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
-		"session_id": sessionID,
+		"session_id":   sessionID,
+		"secret_token": secretToken,
 	})
 }
 
 func (s *SignallingServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("id")
-	if sessionID == "" {
-		http.Error(w, "Missing id", http.StatusBadRequest)
+	token := r.URL.Query().Get("token")
+	if sessionID == "" || token == "" {
+		http.Error(w, "Missing id or token", http.StatusBadRequest)
 		return
 	}
 
@@ -94,6 +109,12 @@ func (s *SignallingServer) handleEvents(w http.ResponseWriter, r *http.Request) 
 
 	if !exists {
 		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	// Validate secret token
+	if session.SecretToken != token {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -144,6 +165,17 @@ func (s *SignallingServer) handleConnect(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	var req struct {
+		SenderName string `json:"sender_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.SenderName == "" {
+		req.SenderName = "Unknown Sender"
+	}
+
 	s.mu.Lock()
 	session, exists := s.sessions[receiverID]
 	s.mu.Unlock()
@@ -153,16 +185,16 @@ func (s *SignallingServer) handleConnect(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	log.Printf("[Server] Sender requesting connection to session %s\n", receiverID)
+	log.Printf("[Server] Sender '%s' requesting connection to session %s\n", req.SenderName, receiverID)
 
 	// Notify receiver that a sender wants to connect
 	select {
-	case session.EventChan <- "sender_request":
+	case session.EventChan <- fmt.Sprintf("sender_request %s", req.SenderName):
 	default:
 		log.Printf("[Server] Warning: session %s event channel full\n", receiverID)
 	}
 
-	// Wait for receiver's approval (timeout after 30 seconds)
+	// Wait for receiver's approval
 	select {
 	case approved := <-session.ApprovedChan:
 		if approved {
@@ -189,8 +221,9 @@ func (s *SignallingServer) handleApprove(w http.ResponseWriter, r *http.Request)
 
 	sessionID := r.URL.Query().Get("id")
 	status := r.URL.Query().Get("status")
-	if sessionID == "" || status == "" {
-		http.Error(w, "Missing id or status", http.StatusBadRequest)
+	token := r.URL.Query().Get("token")
+	if sessionID == "" || status == "" || token == "" {
+		http.Error(w, "Missing id, status, or token", http.StatusBadRequest)
 		return
 	}
 
@@ -200,6 +233,12 @@ func (s *SignallingServer) handleApprove(w http.ResponseWriter, r *http.Request)
 
 	if !exists {
 		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	// Validate secret token
+	if session.SecretToken != token {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
