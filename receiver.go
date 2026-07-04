@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -13,6 +14,8 @@ type Receiver struct {
 	transferRequestChan chan TransferRequest
 	pc                  *webrtc.PeerConnection
 	dc                  *webrtc.DataChannel
+	mu                  sync.Mutex
+	hasAccepted         bool
 	activeFile          *os.File
 	bytesRemaining      int64
 	doneChan            chan error
@@ -64,9 +67,11 @@ func (r *Receiver) Connect(senderToken string) error {
 }
 
 func (r *Receiver) Close() {
+	r.mu.Lock()
 	if r.activeFile != nil {
 		r.activeFile.Close()
 	}
+	r.mu.Unlock()
 
 	if r.dc != nil {
 		r.dc.Close()
@@ -86,6 +91,13 @@ func (r *Receiver) Done() <-chan error {
 }
 
 func (r *Receiver) Accept(tr TransferRequest) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.hasAccepted {
+		return fmt.Errorf("Accept: already accepted a transfer request in this session")
+	}
+
 	outName := tr.FileName + ".download"
 	file, err := os.Create(outName)
 	if err != nil {
@@ -93,6 +105,7 @@ func (r *Receiver) Accept(tr TransferRequest) error {
 	}
 	r.activeFile = file
 	r.bytesRemaining = int64(tr.Size)
+	r.hasAccepted = true
 
 	log.Printf("Accepting transfer of %q (%d bytes) as %q\n", tr.FileName, tr.Size, outName)
 	return r.dc.SendText(fmt.Sprintf("accept %q", tr.FileName))
@@ -117,6 +130,15 @@ func (r *Receiver) setupDataChannel() error {
 
 	r.dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 		if msg.IsString {
+			r.mu.Lock()
+			alreadyAccepted := r.hasAccepted
+			r.mu.Unlock()
+
+			if alreadyAccepted {
+				log.Printf("receiver received metadata message, but a transfer has already been accepted; ignoring subsequent request.\n")
+				return
+			}
+
 			log.Printf("receiver received metadata message\n")
 			tr, err := UnmarshalTransferRequest(msg)
 			if err != nil {
@@ -126,21 +148,32 @@ func (r *Receiver) setupDataChannel() error {
 
 			r.transferRequestChan <- tr
 		} else {
-			if r.activeFile == nil {
+			r.mu.Lock()
+			file := r.activeFile
+			r.mu.Unlock()
+
+			if file == nil {
 				log.Printf("receiver received binary data chunk but no active file download!\n")
 				return
 			}
-			n, err := r.activeFile.Write(msg.Data)
+			n, err := file.Write(msg.Data)
 			if err != nil {
 				log.Printf("failed to write to file: %s", err)
 				r.doneChan <- err
 				return
 			}
+
+			r.mu.Lock()
 			r.bytesRemaining -= int64(n)
-			if r.bytesRemaining <= 0 {
-				log.Printf("Transfer complete! Received all bytes.\n")
+			remaining := r.bytesRemaining
+			if remaining <= 0 {
 				r.activeFile.Close()
 				r.activeFile = nil
+			}
+			r.mu.Unlock()
+
+			if remaining <= 0 {
+				log.Printf("Transfer complete! Received all bytes.\n")
 				r.doneChan <- nil
 			}
 		}
