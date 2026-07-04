@@ -1,0 +1,254 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"math/rand"
+	"net/http"
+	"sync"
+	"time"
+)
+
+type Session struct {
+	ID            string
+	ReceiverToken string
+	EventChan     chan string
+	ApprovedChan  chan bool
+}
+
+type SignallingServer struct {
+	mu       sync.Mutex
+	sessions map[string]*Session
+}
+
+func NewSignallingServer() *SignallingServer {
+	return &SignallingServer{
+		sessions: make(map[string]*Session),
+	}
+}
+
+func (s *SignallingServer) Start(addr string) error {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/register", s.handleRegister)
+	mux.HandleFunc("/events", s.handleEvents)
+	mux.HandleFunc("/connect", s.handleConnect)
+	mux.HandleFunc("/approve", s.handleApprove)
+	mux.HandleFunc("/answer", s.handleAnswer)
+
+	log.Printf("Signalling server starting on %s\n", addr)
+	return http.ListenAndServe(addr, mux)
+}
+
+func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ReceiverToken string `json:"receiver_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	// Generate a unique 6-digit session ID
+	var sessionID string
+	for {
+		sessionID = fmt.Sprintf("%06d", rand.Intn(1000000))
+		if _, exists := s.sessions[sessionID]; !exists {
+			break
+		}
+	}
+
+	session := &Session{
+		ID:            sessionID,
+		ReceiverToken: req.ReceiverToken,
+		EventChan:     make(chan string, 10),
+		ApprovedChan:  make(chan bool, 1),
+	}
+	s.sessions[sessionID] = session
+	s.mu.Unlock()
+
+	log.Printf("[Server] Registered session %s\n", sessionID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"session_id": sessionID,
+	})
+}
+
+func (s *SignallingServer) handleEvents(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("id")
+	if sessionID == "" {
+		http.Error(w, "Missing id", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	session, exists := s.sessions[sessionID]
+	s.mu.Unlock()
+
+	if !exists {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	// Set headers for Server-Sent Events (SSE)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	// Notify receiver that the stream is open
+	fmt.Fprintf(w, "data: connected\n\n")
+	flusher.Flush()
+
+	log.Printf("[Server] Session %s opened SSE stream\n", sessionID)
+
+	for {
+		select {
+		case event, ok := <-session.EventChan:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "data: %s\n\n", event)
+			flusher.Flush()
+		case <-r.Context().Done():
+			log.Printf("[Server] Session %s closed SSE stream\n", sessionID)
+			s.mu.Lock()
+			delete(s.sessions, sessionID)
+			s.mu.Unlock()
+			return
+		}
+	}
+}
+
+func (s *SignallingServer) handleConnect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	receiverID := r.URL.Query().Get("receiver_id")
+	if receiverID == "" {
+		http.Error(w, "Missing receiver_id", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	session, exists := s.sessions[receiverID]
+	s.mu.Unlock()
+
+	if !exists {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	log.Printf("[Server] Sender requesting connection to session %s\n", receiverID)
+
+	// Notify receiver that a sender wants to connect
+	select {
+	case session.EventChan <- "sender_request":
+	default:
+		log.Printf("[Server] Warning: session %s event channel full\n", receiverID)
+	}
+
+	// Wait for receiver's approval (timeout after 30 seconds)
+	select {
+	case approved := <-session.ApprovedChan:
+		if approved {
+			log.Printf("[Server] Connection approved for session %s\n", receiverID)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{
+				"receiver_token": session.ReceiverToken,
+			})
+		} else {
+			log.Printf("[Server] Connection rejected for session %s\n", receiverID)
+			http.Error(w, "Connection rejected by receiver", http.StatusForbidden)
+		}
+	case <-time.After(30 * time.Second):
+		log.Printf("[Server] Connection request timed out for session %s\n", receiverID)
+		http.Error(w, "Request timed out waiting for approval", http.StatusRequestTimeout)
+	}
+}
+
+func (s *SignallingServer) handleApprove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sessionID := r.URL.Query().Get("id")
+	status := r.URL.Query().Get("status")
+	if sessionID == "" || status == "" {
+		http.Error(w, "Missing id or status", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	session, exists := s.sessions[sessionID]
+	s.mu.Unlock()
+
+	if !exists {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	approved := status == "accept"
+	select {
+	case session.ApprovedChan <- approved:
+	default:
+		// already handled or channel full
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *SignallingServer) handleAnswer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	receiverID := r.URL.Query().Get("receiver_id")
+	if receiverID == "" {
+		http.Error(w, "Missing receiver_id", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		SenderToken string `json:"sender_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	session, exists := s.sessions[receiverID]
+	s.mu.Unlock()
+
+	if !exists {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	log.Printf("[Server] Forwarding sender's answer token to session %s\n", receiverID)
+
+	select {
+	case session.EventChan <- fmt.Sprintf("sender_answer %s", req.SenderToken):
+	default:
+		log.Printf("[Server] Warning: session %s event channel full\n", receiverID)
+	}
+
+	w.WriteHeader(http.StatusOK)
+}

@@ -9,11 +9,20 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: yeet send <filename> OR yeet receive")
+		fmt.Println("Usage: yeet send <filename> OR yeet receive OR yeet signalling [addr]")
 		os.Exit(1)
 	}
 
 	switch role := os.Args[1]; role {
+	case "signalling":
+		addr := ":8080"
+		if len(os.Args) >= 3 {
+			addr = os.Args[2]
+		}
+		server := NewSignallingServer()
+		if err := server.Start(addr); err != nil {
+			panic(err)
+		}
 	case "send":
 		if len(os.Args) < 3 {
 			fmt.Println("Usage: yeet send <filename>")
