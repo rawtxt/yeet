@@ -8,8 +8,19 @@ import (
 )
 
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: yeet send <filename> OR yeet receive")
+		os.Exit(1)
+	}
+
 	switch role := os.Args[1]; role {
 	case "send":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: yeet send <filename>")
+			os.Exit(1)
+		}
+		filename := os.Args[2]
+
 		fmt.Printf("Enter session ID: ")
 		sessionID := readLine()
 		sender, err := NewSender(SessionID(sessionID))
@@ -18,7 +29,9 @@ func main() {
 		}
 		defer sender.Close()
 
-		sender.Send("foobar.txt")
+		if err := sender.Send(filename); err != nil {
+			panic(err)
+		}
 		select {}
 
 	case "receive":

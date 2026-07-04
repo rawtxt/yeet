@@ -99,14 +99,18 @@ func setupDataChannel(dc *webrtc.DataChannel, transferRefChan chan<- TransferReq
 	})
 
 	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-		log.Printf("receiver receive message\n")
-		tr, err := UnmarshalTransferRequest(msg)
-		if err != nil {
-			log.Printf("unmarshalling transfer request failed: %s", err)
-			return
-		}
+		if msg.IsString {
+			log.Printf("receiver received metadata message\n")
+			tr, err := UnmarshalTransferRequest(msg)
+			if err != nil {
+				log.Printf("unmarshalling transfer request failed: %s", err)
+				return
+			}
 
-		transferRefChan <- tr
+			transferRefChan <- tr
+		} else {
+			log.Printf("receiver received binary data chunk (%d bytes)\n", len(msg.Data))
+		}
 	})
 
 	dc.OnError(func(err error) {

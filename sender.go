@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -53,11 +55,23 @@ func (s *Sender) Close() {
 }
 
 func (s *Sender) Send(filename string) error {
-	log.Printf("Sending %q\n", filename)
+	file, err := os.Open(filename)
+	if err != nil {
+		return fmt.Errorf("Send: failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("Send: failed to stat file: %w", err)
+	}
+
+	baseName := filepath.Base(filename)
+	log.Printf("Preparing to send %q (%d bytes)\n", baseName, stat.Size())
 
 	acceptanceWaiter := make(chan struct{})
 	s.dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-		if msg.IsString && string(msg.Data) == fmt.Sprintf("accept %q", filename) {
+		if msg.IsString && string(msg.Data) == fmt.Sprintf("accept %q", baseName) {
 			// once receiver accepts, we can then send
 			log.Println("got 'accept' from receiver")
 			close(acceptanceWaiter)
@@ -65,8 +79,8 @@ func (s *Sender) Send(filename string) error {
 	})
 
 	tr := TransferRequest{
-		FileName: filename,
-		Size:     67,
+		FileName: baseName,
+		Size:     int(stat.Size()),
 	}
 
 	bytes, err := tr.Marshal()
@@ -75,12 +89,12 @@ func (s *Sender) Send(filename string) error {
 	}
 
 	log.Println("Sending transfer request to receiver")
-	if err := s.dc.Send(bytes); err != nil {
+	if err := s.dc.SendText(string(bytes)); err != nil {
 		return fmt.Errorf("Send: %w", err)
 	}
 
 	<-acceptanceWaiter
-	log.Printf("Got approval from receiver to send %q\n", filename)
+	log.Printf("Got approval from receiver to send %q\n", baseName)
 	// we can now send after getting approval from receiver
 
 	return nil
