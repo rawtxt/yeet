@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -12,6 +13,9 @@ type Receiver struct {
 	transferRequestChan chan TransferRequest
 	pc                  *webrtc.PeerConnection
 	dc                  *webrtc.DataChannel
+	activeFile          *os.File
+	bytesRemaining      int64
+	doneChan            chan error
 }
 
 func NewReceiver() (*Receiver, error) {
@@ -25,8 +29,15 @@ func NewReceiver() (*Receiver, error) {
 		return nil, fmt.Errorf("NewReceiver: %w", err)
 	}
 
-	transferReqChan := make(chan TransferRequest, 1) // each session only supports one transfer
-	if err := setupDataChannel(dc, transferReqChan); err != nil {
+	r := &Receiver{
+		SessionID:           "SessionID-123",
+		transferRequestChan: make(chan TransferRequest, 1),
+		pc:                  pc,
+		dc:                  dc,
+		doneChan:            make(chan error, 1),
+	}
+
+	if err := r.setupDataChannel(); err != nil {
 		return nil, fmt.Errorf("NewReceiver: %w", err)
 	}
 
@@ -41,20 +52,22 @@ func NewReceiver() (*Receiver, error) {
 
 	<-webrtc.GatheringCompletePromise(pc)
 
-	sessionID, err := initSession(pc)
-	if err != nil {
-		return nil, fmt.Errorf("NewReceiver: %w", err)
-	}
+	return r, nil
+}
 
-	return &Receiver{
-		SessionID:           sessionID,
-		transferRequestChan: transferReqChan,
-		pc:                  pc,
-		dc:                  dc,
-	}, nil
+func (r *Receiver) LocalToken() string {
+	return encodeSDP(*r.pc.LocalDescription())
+}
+
+func (r *Receiver) Connect(senderToken string) error {
+	return r.pc.SetRemoteDescription(decodeSDP(senderToken))
 }
 
 func (r *Receiver) Close() {
+	if r.activeFile != nil {
+		r.activeFile.Close()
+	}
+
 	if r.dc != nil {
 		r.dc.Close()
 	}
@@ -68,37 +81,41 @@ func (r *Receiver) TransferRequest() <-chan TransferRequest {
 	return r.transferRequestChan
 }
 
+func (r *Receiver) Done() <-chan error {
+	return r.doneChan
+}
+
 func (r *Receiver) Accept(tr TransferRequest) error {
+	outName := tr.FileName + ".download"
+	file, err := os.Create(outName)
+	if err != nil {
+		return fmt.Errorf("Accept: failed to create output file: %w", err)
+	}
+	r.activeFile = file
+	r.bytesRemaining = int64(tr.Size)
+
+	log.Printf("Accepting transfer of %q (%d bytes) as %q\n", tr.FileName, tr.Size, outName)
 	return r.dc.SendText(fmt.Sprintf("accept %q", tr.FileName))
 }
 
-func initSession(pc *webrtc.PeerConnection) (SessionID, error) {
-	desc := encodeSDP(*pc.LocalDescription())
-	fmt.Println("receiver token:", desc)
-
-	// TODO: get a session id from the signalling server
-
-	return "SessionID-123", nil
-}
-
-func setupDataChannel(dc *webrtc.DataChannel, transferRefChan chan<- TransferRequest) error {
-	dc.OnOpen(func() {
+func (r *Receiver) setupDataChannel() error {
+	r.dc.OnOpen(func() {
 		log.Println("Data channel opened")
 	})
 
-	dc.OnClose(func() {
+	r.dc.OnClose(func() {
 		log.Println("Data channel closed")
 	})
 
-	dc.OnBufferedAmountLow(func() {
+	r.dc.OnBufferedAmountLow(func() {
 		log.Println("Data channel buffered amount low")
 	})
 
-	dc.OnDial(func() {
+	r.dc.OnDial(func() {
 		log.Println("Data channel onDial")
 	})
 
-	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+	r.dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 		if msg.IsString {
 			log.Printf("receiver received metadata message\n")
 			tr, err := UnmarshalTransferRequest(msg)
@@ -107,13 +124,29 @@ func setupDataChannel(dc *webrtc.DataChannel, transferRefChan chan<- TransferReq
 				return
 			}
 
-			transferRefChan <- tr
+			r.transferRequestChan <- tr
 		} else {
-			log.Printf("receiver received binary data chunk (%d bytes)\n", len(msg.Data))
+			if r.activeFile == nil {
+				log.Printf("receiver received binary data chunk but no active file download!\n")
+				return
+			}
+			n, err := r.activeFile.Write(msg.Data)
+			if err != nil {
+				log.Printf("failed to write to file: %s", err)
+				r.doneChan <- err
+				return
+			}
+			r.bytesRemaining -= int64(n)
+			if r.bytesRemaining <= 0 {
+				log.Printf("Transfer complete! Received all bytes.\n")
+				r.activeFile.Close()
+				r.activeFile = nil
+				r.doneChan <- nil
+			}
 		}
 	})
 
-	dc.OnError(func(err error) {
+	r.dc.OnError(func(err error) {
 		log.Printf("Data channel error: %s", err)
 	})
 

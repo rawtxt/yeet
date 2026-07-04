@@ -23,38 +23,51 @@ func main() {
 
 		fmt.Printf("Enter session ID: ")
 		sessionID := readLine()
-		sender, err := NewSender(SessionID(sessionID))
+
+		fmt.Printf("Enter receiver token: ")
+		receiverToken := readLine()
+
+		sender, err := NewSender(SessionID(sessionID), receiverToken)
 		if err != nil {
 			panic(err)
 		}
 		defer sender.Close()
 
+		fmt.Printf("Sender token: %s\n\n", sender.LocalToken())
+
 		if err := sender.Send(filename); err != nil {
 			panic(err)
 		}
-		select {}
+		fmt.Println("Sender done!")
 
 	case "receive":
-		// runReceiver(pc)
 		receiver, err := NewReceiver()
 		if err != nil {
 			panic(err)
 		}
 		defer receiver.Close()
 
-		// TODO: this should be done automatically in initSession
+		fmt.Println("receiver token:", receiver.LocalToken())
+
 		fmt.Printf("\nEnter sender token: ")
 		senderToken := readLine()
-		if err := receiver.pc.SetRemoteDescription(decodeSDP(senderToken)); err != nil {
+		if err := receiver.Connect(senderToken); err != nil {
 			panic(err)
 		}
 
 		tr := <-receiver.TransferRequest()
-		fmt.Printf("Received %#v\n", tr)
+		fmt.Printf("Received transfer request for %s (%d bytes)\n", tr.FileName, tr.Size)
 
-		fmt.Println("Accepting request")
-		receiver.Accept(tr)
-		select {}
+		fmt.Println("Accepting request...")
+		if err := receiver.Accept(tr); err != nil {
+			panic(err)
+		}
+
+		if err := <-receiver.Done(); err != nil {
+			fmt.Printf("Error during transfer: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Receiver done! File successfully saved as %s.download\n", tr.FileName)
 	}
 }
 

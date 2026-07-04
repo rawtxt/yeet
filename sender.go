@@ -2,32 +2,41 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 )
 
 type Sender struct {
-	SessionID SessionID
-	pc        *webrtc.PeerConnection
-	dc        *webrtc.DataChannel
+	SessionID        SessionID
+	pc               *webrtc.PeerConnection
+	dc               *webrtc.DataChannel
+	dataChannelReady chan struct{}
 }
 
-func NewSender(sessionID SessionID) (*Sender, error) {
+func NewSender(sessionID SessionID, receiverToken string) (*Sender, error) {
 	pc, err := webrtc.NewPeerConnection(WebRTCConfig())
 	if err != nil {
 		return nil, fmt.Errorf("NewSender: %w", err)
 	}
 
-	dataChannelWaiter := make(chan *webrtc.DataChannel, 1)
+	s := &Sender{
+		SessionID:        sessionID,
+		pc:               pc,
+		dataChannelReady: make(chan struct{}),
+	}
+
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		log.Println("Received Data Channel", dc.Label())
-		dataChannelWaiter <- dc
+		s.dc = dc
+		close(s.dataChannelReady)
 	})
 
-	receiverSD := getReceiverSD(sessionID)
+	receiverSD := decodeSDP(receiverToken)
 	if err := pc.SetRemoteDescription(receiverSD); err != nil {
 		return nil, fmt.Errorf("NewSender: %w", err)
 	}
@@ -41,12 +50,13 @@ func NewSender(sessionID SessionID) (*Sender, error) {
 		return nil, fmt.Errorf("NewSender: %w", err)
 	}
 
-	fmt.Printf("Sender token: %s\n\n", encodeSDP(*pc.LocalDescription()))
-
 	<-webrtc.GatheringCompletePromise(pc)
 
-	dc := <-dataChannelWaiter
-	return &Sender{SessionID: sessionID, pc: pc, dc: dc}, nil
+	return s, nil
+}
+
+func (s *Sender) LocalToken() string {
+	return encodeSDP(*s.pc.LocalDescription())
 }
 
 func (s *Sender) Close() {
@@ -55,6 +65,14 @@ func (s *Sender) Close() {
 }
 
 func (s *Sender) Send(filename string) error {
+	log.Println("Waiting for PeerConnection to establish data channel...")
+	select {
+	case <-s.dataChannelReady:
+		log.Println("Data channel established successfully!")
+	case <-time.After(30 * time.Second):
+		return fmt.Errorf("Send: timed out waiting for connection from receiver")
+	}
+
 	file, err := os.Open(filename)
 	if err != nil {
 		return fmt.Errorf("Send: failed to open file: %w", err)
@@ -95,13 +113,32 @@ func (s *Sender) Send(filename string) error {
 
 	<-acceptanceWaiter
 	log.Printf("Got approval from receiver to send %q\n", baseName)
-	// we can now send after getting approval from receiver
 
+	buffer := make([]byte, 16*1024)
+	totalSent := int64(0)
+	for {
+		n, err := file.Read(buffer)
+		if n > 0 {
+			// WebRTC flow control: ensure we don't overwhelm the sending buffer.
+			// If BufferedAmount is too high (e.g. > 1MB), wait for it to clear.
+			for s.dc.BufferedAmount() > 1024*1024 {
+				time.Sleep(10 * time.Millisecond)
+			}
+
+			if err := s.dc.Send(buffer[:n]); err != nil {
+				return fmt.Errorf("Send: failed to send chunk: %w", err)
+			}
+			totalSent += int64(n)
+			log.Printf("Progress: %d / %d bytes sent (%.2f%%)\n", totalSent, stat.Size(), float64(totalSent)/float64(stat.Size())*100)
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("Send: failed reading file: %w", err)
+		}
+	}
+
+	log.Println("File sent completely!")
 	return nil
-}
-
-func getReceiverSD(_ SessionID) webrtc.SessionDescription {
-	fmt.Printf("Enter receiver token: ")
-	receiverToken := readLine()
-	return decodeSDP(receiverToken)
 }
