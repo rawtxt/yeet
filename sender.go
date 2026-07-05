@@ -46,7 +46,7 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 		return nil, fmt.Errorf("NewSender: %w", err)
 	}
 
-	resp, err := http.Post(serverURL+"/connect?receiver_id="+string(sessionID), "application/json", bytes.NewReader(reqBody))
+	resp, err := http.Post(serverURL+"/connect?session_id="+string(sessionID), "application/json", bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("NewSender: server connect request failed: %w", err)
 	}
@@ -107,7 +107,7 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 		return nil, fmt.Errorf("NewSender: failed to marshal answer: %w", err)
 	}
 
-	answerResp, err := http.Post(serverURL+"/answer?receiver_id="+string(sessionID), "application/json", bytes.NewReader(answerReqBody))
+	answerResp, err := http.Post(serverURL+"/answer?session_id="+string(sessionID), "application/json", bytes.NewReader(answerReqBody))
 	if err != nil {
 		return nil, fmt.Errorf("NewSender: failed to submit answer to server: %w", err)
 	}

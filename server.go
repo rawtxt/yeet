@@ -96,10 +96,10 @@ func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request
 }
 
 func (s *SignallingServer) handleEvents(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.URL.Query().Get("id")
+	sessionID := r.URL.Query().Get("session_id")
 	token := r.URL.Query().Get("token")
 	if sessionID == "" || token == "" {
-		http.Error(w, "Missing id or token", http.StatusBadRequest)
+		http.Error(w, "Missing session_id or token", http.StatusBadRequest)
 		return
 	}
 
@@ -159,9 +159,9 @@ func (s *SignallingServer) handleConnect(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	receiverID := r.URL.Query().Get("receiver_id")
-	if receiverID == "" {
-		http.Error(w, "Missing receiver_id", http.StatusBadRequest)
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		http.Error(w, "Missing session_id", http.StatusBadRequest)
 		return
 	}
 
@@ -177,7 +177,7 @@ func (s *SignallingServer) handleConnect(w http.ResponseWriter, r *http.Request)
 	}
 
 	s.mu.Lock()
-	session, exists := s.sessions[receiverID]
+	session, exists := s.sessions[sessionID]
 	s.mu.Unlock()
 
 	if !exists {
@@ -185,30 +185,30 @@ func (s *SignallingServer) handleConnect(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	log.Printf("[Server] Sender '%s' requesting connection to session %s\n", req.SenderName, receiverID)
+	log.Printf("[Server] Sender '%s' requesting connection to session %s\n", req.SenderName, sessionID)
 
-	// Notify receiver that a sender wants to connect
+	// Notify receiver that a sender wants to connect (include sender name)
 	select {
 	case session.EventChan <- fmt.Sprintf("sender_request %s", req.SenderName):
 	default:
-		log.Printf("[Server] Warning: session %s event channel full\n", receiverID)
+		log.Printf("[Server] Warning: session %s event channel full\n", sessionID)
 	}
 
-	// Wait for receiver's approval
+	// Wait for receiver's approval (timeout after 30 seconds)
 	select {
 	case approved := <-session.ApprovedChan:
 		if approved {
-			log.Printf("[Server] Connection approved for session %s\n", receiverID)
+			log.Printf("[Server] Connection approved for session %s\n", sessionID)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{
 				"receiver_token": session.ReceiverToken,
 			})
 		} else {
-			log.Printf("[Server] Connection rejected for session %s\n", receiverID)
+			log.Printf("[Server] Connection rejected for session %s\n", sessionID)
 			http.Error(w, "Connection rejected by receiver", http.StatusForbidden)
 		}
 	case <-time.After(30 * time.Second):
-		log.Printf("[Server] Connection request timed out for session %s\n", receiverID)
+		log.Printf("[Server] Connection request timed out for session %s\n", sessionID)
 		http.Error(w, "Request timed out waiting for approval", http.StatusRequestTimeout)
 	}
 }
@@ -219,11 +219,11 @@ func (s *SignallingServer) handleApprove(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	sessionID := r.URL.Query().Get("id")
+	sessionID := r.URL.Query().Get("session_id")
 	status := r.URL.Query().Get("status")
 	token := r.URL.Query().Get("token")
 	if sessionID == "" || status == "" || token == "" {
-		http.Error(w, "Missing id, status, or token", http.StatusBadRequest)
+		http.Error(w, "Missing session_id, status, or token", http.StatusBadRequest)
 		return
 	}
 
@@ -258,9 +258,9 @@ func (s *SignallingServer) handleAnswer(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	receiverID := r.URL.Query().Get("receiver_id")
-	if receiverID == "" {
-		http.Error(w, "Missing receiver_id", http.StatusBadRequest)
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		http.Error(w, "Missing session_id", http.StatusBadRequest)
 		return
 	}
 
@@ -273,7 +273,7 @@ func (s *SignallingServer) handleAnswer(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.mu.Lock()
-	session, exists := s.sessions[receiverID]
+	session, exists := s.sessions[sessionID]
 	s.mu.Unlock()
 
 	if !exists {
@@ -281,12 +281,12 @@ func (s *SignallingServer) handleAnswer(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	log.Printf("[Server] Forwarding sender's answer token to session %s\n", receiverID)
+	log.Printf("[Server] Forwarding sender's answer token to session %s\n", sessionID)
 
 	select {
 	case session.EventChan <- fmt.Sprintf("sender_answer %s", req.SenderToken):
 	default:
-		log.Printf("[Server] Warning: session %s event channel full\n", receiverID)
+		log.Printf("[Server] Warning: session %s event channel full\n", sessionID)
 	}
 
 	w.WriteHeader(http.StatusOK)

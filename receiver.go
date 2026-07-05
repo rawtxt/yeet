@@ -170,7 +170,7 @@ func (r *Receiver) registerSession() error {
 }
 
 func (r *Receiver) listenToEvents() {
-	url := fmt.Sprintf("%s/events?id=%s&token=%s", r.serverURL, r.SessionID, r.SecretToken)
+	url := fmt.Sprintf("%s/events?session_id=%s&token=%s", r.serverURL, r.SessionID, r.SecretToken)
 	resp, err := http.Get(url)
 	if err != nil {
 		log.Printf("SSE: connection failed: %v\n", err)
@@ -202,7 +202,7 @@ func (r *Receiver) listenToEvents() {
 }
 
 func (r *Receiver) ApproveConnection() error {
-	url := fmt.Sprintf("%s/approve?id=%s&status=accept&token=%s", r.serverURL, r.SessionID, r.SecretToken)
+	url := fmt.Sprintf("%s/approve?session_id=%s&status=accept&token=%s", r.serverURL, r.SessionID, r.SecretToken)
 	resp, err := http.Post(url, "", nil)
 	if err != nil {
 		return err
@@ -216,7 +216,7 @@ func (r *Receiver) ApproveConnection() error {
 }
 
 func (r *Receiver) RejectConnection() error {
-	url := fmt.Sprintf("%s/approve?id=%s&status=reject&token=%s", r.serverURL, r.SessionID, r.SecretToken)
+	url := fmt.Sprintf("%s/approve?session_id=%s&status=reject&token=%s", r.serverURL, r.SessionID, r.SecretToken)
 	resp, err := http.Post(url, "", nil)
 	if err != nil {
 		return err
