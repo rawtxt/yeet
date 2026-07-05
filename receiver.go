@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/pion/webrtc/v4"
@@ -11,6 +16,8 @@ import (
 
 type Receiver struct {
 	SessionID           SessionID
+	SecretToken         string
+	serverURL           string
 	transferRequestChan chan TransferRequest
 	pc                  *webrtc.PeerConnection
 	dc                  *webrtc.DataChannel
@@ -19,9 +26,12 @@ type Receiver struct {
 	activeFile          *os.File
 	bytesRemaining      int64
 	doneChan            chan error
+
+	senderRequestChan chan string
+	senderAnswerChan  chan string
 }
 
-func NewReceiver() (*Receiver, error) {
+func NewReceiver(serverURL string) (*Receiver, error) {
 	pc, err := webrtc.NewPeerConnection(WebRTCConfig())
 	if err != nil {
 		return nil, fmt.Errorf("NewReceiver: %w", err)
@@ -33,11 +43,13 @@ func NewReceiver() (*Receiver, error) {
 	}
 
 	r := &Receiver{
-		SessionID:           "SessionID-123",
+		serverURL:           serverURL,
 		transferRequestChan: make(chan TransferRequest, 1),
 		pc:                  pc,
 		dc:                  dc,
 		doneChan:            make(chan error, 1),
+		senderRequestChan:   make(chan string, 1),
+		senderAnswerChan:    make(chan string, 1),
 	}
 
 	if err := r.setupDataChannel(); err != nil {
@@ -54,6 +66,12 @@ func NewReceiver() (*Receiver, error) {
 	}
 
 	<-webrtc.GatheringCompletePromise(pc)
+
+	if err := r.registerSession(); err != nil {
+		return nil, fmt.Errorf("NewReceiver: register failed: %w", err)
+	}
+
+	go r.listenToEvents()
 
 	return r, nil
 }
@@ -90,6 +108,14 @@ func (r *Receiver) Done() <-chan error {
 	return r.doneChan
 }
 
+func (r *Receiver) SenderRequest() <-chan string {
+	return r.senderRequestChan
+}
+
+func (r *Receiver) SenderAnswer() <-chan string {
+	return r.senderAnswerChan
+}
+
 func (r *Receiver) Accept(tr TransferRequest) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -109,6 +135,98 @@ func (r *Receiver) Accept(tr TransferRequest) error {
 
 	log.Printf("Accepting transfer of %q (%d bytes) as %q\n", tr.FileName, tr.Size, outName)
 	return r.dc.SendText(fmt.Sprintf("accept %q", tr.FileName))
+}
+
+func (r *Receiver) registerSession() error {
+	localToken := r.LocalToken()
+	reqBody, err := json.Marshal(map[string]string{
+		"receiver_token": localToken,
+	})
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.Post(r.serverURL+"/register", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned status: %s", resp.Status)
+	}
+
+	var res struct {
+		SessionID   string `json:"session_id"`
+		SecretToken string `json:"secret_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return err
+	}
+
+	r.SessionID = SessionID(res.SessionID)
+	r.SecretToken = res.SecretToken
+	return nil
+}
+
+func (r *Receiver) listenToEvents() {
+	url := fmt.Sprintf("%s/events?id=%s&token=%s", r.serverURL, r.SessionID, r.SecretToken)
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Printf("SSE: connection failed: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if after, ok := strings.CutPrefix(line, "data: "); ok {
+			data := after
+			if data == "connected" {
+				continue
+			}
+
+			if after, ok := strings.CutPrefix(data, "sender_request "); ok {
+				senderName := after
+				r.senderRequestChan <- senderName
+			} else if after, ok := strings.CutPrefix(data, "sender_answer "); ok {
+				senderToken := after
+				r.senderAnswerChan <- senderToken
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("SSE: stream read error: %v\n", err)
+	}
+}
+
+func (r *Receiver) ApproveConnection() error {
+	url := fmt.Sprintf("%s/approve?id=%s&status=accept&token=%s", r.serverURL, r.SessionID, r.SecretToken)
+	resp, err := http.Post(url, "", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("approve connection failed: server status %s", resp.Status)
+	}
+	return nil
+}
+
+func (r *Receiver) RejectConnection() error {
+	url := fmt.Sprintf("%s/approve?id=%s&status=reject&token=%s", r.serverURL, r.SessionID, r.SecretToken)
+	resp, err := http.Post(url, "", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("reject connection failed: server status %s", resp.Status)
+	}
+	return nil
 }
 
 func (r *Receiver) setupDataChannel() error {

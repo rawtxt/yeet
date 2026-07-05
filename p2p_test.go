@@ -11,7 +11,13 @@ import (
 )
 
 func TestP2PFileTransfer(t *testing.T) {
-	// 1. Create a temporary file with some content to transfer
+	server := NewSignallingServer()
+	go func() {
+		_ = server.Start(":18080")
+	}()
+	// Give the server a few milliseconds to start up
+	time.Sleep(50 * time.Millisecond)
+
 	tmpDir, err := os.MkdirTemp("", "yeet-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
@@ -28,64 +34,75 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
 		t.Fatalf("failed to write source file: %v", err)
 	}
 
-	// 2. Initialize the receiver
-	receiver, err := NewReceiver()
+	receiver, err := NewReceiver("http://localhost:18080")
 	if err != nil {
 		t.Fatalf("failed to create receiver: %v", err)
 	}
 	defer receiver.Close()
 
-	receiverToken := receiver.LocalToken()
-
-	// 3. Initialize the sender using the receiver's token
-	sender, err := NewSender("test-session", receiverToken)
-	if err != nil {
-		t.Fatalf("failed to create sender: %v", err)
-	}
-	defer sender.Close()
-
-	senderToken := sender.LocalToken()
-
-	// 4. Connect the receiver to the sender's token
-	if err := receiver.Connect(senderToken); err != nil {
-		t.Fatalf("failed to connect receiver to sender: %v", err)
-	}
-
-	// 5. In a separate goroutine, run the receiver wait logic
 	recvDone := make(chan error, 1)
 	go func() {
-		// Wait for transfer request
-		var tr TransferRequest
+		var senderName string
 		select {
-		case tr = <-receiver.TransferRequest():
-			// Accept request
-			if err := receiver.Accept(tr); err != nil {
-				recvDone <- err
-				return
-			}
+		case senderName = <-receiver.SenderRequest():
+			log.Printf("Test Receiver: Received request from '%s'\n", senderName)
 		case <-time.After(5 * time.Second):
-			t.Error("timed out waiting for transfer request")
-			recvDone <- fmt.Errorf("timeout")
+			recvDone <- fmt.Errorf("timeout waiting for sender request")
 			return
 		}
 
-		// Wait for completion
+		if err := receiver.ApproveConnection(); err != nil {
+			recvDone <- fmt.Errorf("failed to approve: %w", err)
+			return
+		}
+
+		var senderToken string
+		select {
+		case senderToken = <-receiver.SenderAnswer():
+		case <-time.After(5 * time.Second):
+			recvDone <- fmt.Errorf("timeout waiting for sender answer")
+			return
+		}
+
+		if err := receiver.Connect(senderToken); err != nil {
+			recvDone <- fmt.Errorf("failed to connect receiver: %w", err)
+			return
+		}
+
+		var tr TransferRequest
+		select {
+		case tr = <-receiver.TransferRequest():
+			log.Printf("Test Receiver: Received transfer request for %s (%d bytes)\n", tr.FileName, tr.Size)
+		case <-time.After(5 * time.Second):
+			recvDone <- fmt.Errorf("timeout waiting for transfer request")
+			return
+		}
+
+		if err := receiver.Accept(tr); err != nil {
+			recvDone <- fmt.Errorf("failed to accept transfer: %w", err)
+			return
+		}
+
 		select {
 		case err := <-receiver.Done():
 			recvDone <- err
 		case <-time.After(10 * time.Second):
-			t.Error("timed out waiting for transfer completion")
-			recvDone <- fmt.Errorf("timeout")
+			recvDone <- fmt.Errorf("timeout waiting for transfer completion")
 		}
 	}()
 
-	// 6. Send the file on the main goroutine (in a background goroutine to avoid any blocking/deadlocks)
 	sendErrChan := make(chan error, 1)
 	go func() {
+		sender, err := NewSender("http://localhost:18080", receiver.SessionID)
+		if err != nil {
+			sendErrChan <- fmt.Errorf("failed to create sender: %w", err)
+			return
+		}
+		defer sender.Close()
+
 		sendErrChan <- sender.Send(srcPath)
 	}()
 
-	// 7. Check for sender errors
 	select {
 	case err := <-sendErrChan:
 		if err != nil {
@@ -95,7 +112,6 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
 		t.Fatalf("sender timed out")
 	}
 
-	// 8. Check for receiver errors
 	select {
 	case err := <-recvDone:
 		if err != nil {
@@ -105,9 +121,8 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
 		t.Fatalf("receiver timed out")
 	}
 
-	// 9. Verify the transferred file
 	destPath := "source.bin.download"
-	defer os.Remove(destPath) // clean up after ourselves
+	defer os.Remove(destPath)
 
 	destContent, err := os.ReadFile(destPath)
 	if err != nil {
@@ -118,12 +133,11 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
 		t.Errorf("content mismatch!\nExpected: %q\nGot:      %q", content, destContent)
 	}
 
-	// Double check with SHA256 hashes
 	h1 := sha256.Sum256(content)
 	h2 := sha256.Sum256(destContent)
 	if h1 != h2 {
 		t.Errorf("SHA256 hashes do not match!")
 	} else {
-		log.Println("Go Integration Test: Success! File transferred correctly with verified integrity.")
+		log.Println("Go Integration Test: Success! File transferred completely via automated signalling server with verified integrity.")
 	}
 }

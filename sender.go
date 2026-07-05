@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
 	"time"
 
@@ -18,7 +22,49 @@ type Sender struct {
 	dataChannelReady chan struct{}
 }
 
-func NewSender(sessionID SessionID, receiverToken string) (*Sender, error) {
+func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
+	u, err := user.Current()
+	var username string
+	if err == nil {
+		username = u.Username
+	} else {
+		username = "unknown"
+	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
+
+	senderName := fmt.Sprintf("%s@%s", username, hostname)
+
+	log.Printf("Connecting to signalling server, requesting connection to receiver %s as '%s'...\n", sessionID, senderName)
+	reqBody, err := json.Marshal(map[string]string{
+		"sender_name": senderName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("NewSender: %w", err)
+	}
+
+	resp, err := http.Post(serverURL+"/connect?receiver_id="+string(sessionID), "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("NewSender: server connect request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("NewSender: connection rejected by the receiver")
+	} else if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("NewSender: server returned status: %s", resp.Status)
+	}
+
+	var res struct {
+		ReceiverToken string `json:"receiver_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("NewSender: failed to parse response: %w", err)
+	}
+
 	pc, err := webrtc.NewPeerConnection(WebRTCConfig())
 	if err != nil {
 		return nil, fmt.Errorf("NewSender: %w", err)
@@ -36,7 +82,7 @@ func NewSender(sessionID SessionID, receiverToken string) (*Sender, error) {
 		close(s.dataChannelReady)
 	})
 
-	receiverSD := decodeSDP(receiverToken)
+	receiverSD := decodeSDP(res.ReceiverToken)
 	if err := pc.SetRemoteDescription(receiverSD); err != nil {
 		return nil, fmt.Errorf("NewSender: %w", err)
 	}
@@ -52,6 +98,25 @@ func NewSender(sessionID SessionID, receiverToken string) (*Sender, error) {
 
 	<-webrtc.GatheringCompletePromise(pc)
 
+	log.Println("Submitting connection answer to signalling server...")
+	localAnswer := s.LocalToken()
+	answerReqBody, err := json.Marshal(map[string]string{
+		"sender_token": localAnswer,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("NewSender: failed to marshal answer: %w", err)
+	}
+
+	answerResp, err := http.Post(serverURL+"/answer?receiver_id="+string(sessionID), "application/json", bytes.NewReader(answerReqBody))
+	if err != nil {
+		return nil, fmt.Errorf("NewSender: failed to submit answer to server: %w", err)
+	}
+	defer answerResp.Body.Close()
+
+	if answerResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("NewSender: failed to submit answer: server returned status %s", answerResp.Status)
+	}
+
 	return s, nil
 }
 
@@ -60,8 +125,12 @@ func (s *Sender) LocalToken() string {
 }
 
 func (s *Sender) Close() {
-	s.dc.Close()
-	s.pc.Close()
+	if s.dc != nil {
+		s.dc.Close()
+	}
+	if s.pc != nil {
+		s.pc.Close()
+	}
 }
 
 func (s *Sender) Send(filename string) error {

@@ -30,19 +30,14 @@ func main() {
 		}
 		filename := os.Args[2]
 
-		fmt.Printf("Enter session ID: ")
+		fmt.Printf("Enter 6-digit Session ID: ")
 		sessionID := readLine()
 
-		fmt.Printf("Enter receiver token: ")
-		receiverToken := readLine()
-
-		sender, err := NewSender(SessionID(sessionID), receiverToken)
+		sender, err := NewSender("http://localhost:8080", SessionID(sessionID))
 		if err != nil {
 			panic(err)
 		}
 		defer sender.Close()
-
-		fmt.Printf("Sender token: %s\n\n", sender.LocalToken())
 
 		if err := sender.Send(filename); err != nil {
 			panic(err)
@@ -50,16 +45,32 @@ func main() {
 		fmt.Println("Sender done!")
 
 	case "receive":
-		receiver, err := NewReceiver()
+		receiver, err := NewReceiver("http://localhost:8080")
 		if err != nil {
 			panic(err)
 		}
 		defer receiver.Close()
 
-		fmt.Println("receiver token:", receiver.LocalToken())
+		fmt.Printf("Your 6-digit Session ID: %s\n", receiver.SessionID)
+		fmt.Println("Waiting for a sender to connect...")
 
-		fmt.Printf("\nEnter sender token: ")
-		senderToken := readLine()
+		senderName := <-receiver.SenderRequest()
+		fmt.Printf("\nIncoming connection request from '%s'. Accept? (y/n): ", senderName)
+		answer := readLine()
+		if strings.ToLower(answer) != "y" && strings.ToLower(answer) != "yes" {
+			if err := receiver.RejectConnection(); err != nil {
+				fmt.Printf("Error rejecting connection: %v\n", err)
+			}
+			fmt.Println("Connection rejected.")
+			return
+		}
+
+		fmt.Println("Accepting connection, establishing P2P link...")
+		if err := receiver.ApproveConnection(); err != nil {
+			panic(err)
+		}
+
+		senderToken := <-receiver.SenderAnswer()
 		if err := receiver.Connect(senderToken); err != nil {
 			panic(err)
 		}
@@ -67,7 +78,7 @@ func main() {
 		tr := <-receiver.TransferRequest()
 		fmt.Printf("Received transfer request for %s (%d bytes)\n", tr.FileName, tr.Size)
 
-		fmt.Println("Accepting request...")
+		fmt.Println("Accepting transfer request...")
 		if err := receiver.Accept(tr); err != nil {
 			panic(err)
 		}
