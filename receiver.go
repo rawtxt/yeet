@@ -291,7 +291,10 @@ func (r *Receiver) setupDataChannel() error {
 			r.mu.Unlock()
 
 			if remaining <= 0 {
-				log.Printf("Transfer complete! Received all bytes.\n")
+				log.Printf("Transfer complete! Received all bytes. Sending completion acknowledgment...\n")
+				if err := r.dc.SendText("done"); err != nil {
+					log.Printf("Warning: failed to send completion acknowledgment: %v\n", err)
+				}
 				r.doneChan <- nil
 			}
 		}

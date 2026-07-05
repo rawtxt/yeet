@@ -208,6 +208,21 @@ func (s *Sender) Send(filename string) error {
 		}
 	}
 
-	log.Println("File sent completely!")
+	log.Println("File sent completely! Waiting for receiver confirmation...")
+
+	doneWaiter := make(chan struct{})
+	s.dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+		if msg.IsString && string(msg.Data) == "done" {
+			close(doneWaiter)
+		}
+	})
+
+	select {
+	case <-doneWaiter:
+		log.Println("Receiver confirmed successful receipt of all bytes. Transfer complete!")
+	case <-time.After(15 * time.Second):
+		return fmt.Errorf("Send: timed out waiting for receiver completion acknowledgment")
+	}
+
 	return nil
 }
