@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -295,7 +296,12 @@ func (r *Receiver) setupDataChannel() error {
 				if err := r.dc.SendText("done"); err != nil {
 					log.Printf("Warning: failed to send completion acknowledgment: %v\n", err)
 				}
-				r.doneChan <- nil
+
+				// Wait 200ms before triggering Done to ensure the "done" packet is flushed out of WebRTC network queues
+				go func() {
+					time.Sleep(200 * time.Millisecond)
+					r.doneChan <- nil
+				}()
 			}
 		}
 	})
