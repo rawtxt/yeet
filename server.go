@@ -18,6 +18,7 @@ type Session struct {
 	ReceiverToken string
 	EventChan     chan string
 	ApprovedChan  chan bool
+	ExpiresAt     time.Time
 }
 
 type SignallingServer struct {
@@ -32,6 +33,9 @@ func NewSignallingServer() *SignallingServer {
 }
 
 func (s *SignallingServer) Start(addr string) error {
+	// Start background janitor to clean up expired sessions
+	go s.reapExpiredSessions()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/register", s.handleRegister)
 	mux.HandleFunc("/events", s.handleEvents)
@@ -41,6 +45,32 @@ func (s *SignallingServer) Start(addr string) error {
 
 	log.Printf("Signalling server starting on %s\n", addr)
 	return http.ListenAndServe(addr, mux)
+}
+
+func (s *SignallingServer) Reap() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	reapedCount := 0
+	for id, session := range s.sessions {
+		if now.After(session.ExpiresAt) {
+			close(session.EventChan)
+			delete(s.sessions, id)
+			reapedCount++
+		}
+	}
+	return reapedCount
+}
+
+func (s *SignallingServer) reapExpiredSessions() {
+	ticker := time.NewTicker(1 * time.Minute)
+	for range ticker.C {
+		reapedCount := s.Reap()
+		if reapedCount > 0 {
+			log.Printf("[Server] Cleaned up %d expired sessions\n", reapedCount)
+		}
+	}
 }
 
 func generateSecretToken() string {
@@ -82,6 +112,7 @@ func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request
 		ReceiverToken: req.ReceiverToken,
 		EventChan:     make(chan string, 10),
 		ApprovedChan:  make(chan bool, 1),
+		ExpiresAt:     time.Now().Add(5 * time.Minute), // Sessions expire in 5 minutes
 	}
 	s.sessions[sessionID] = session
 	s.mu.Unlock()

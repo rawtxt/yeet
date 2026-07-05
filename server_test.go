@@ -152,3 +152,55 @@ func TestSignallingConnectAndApprove(t *testing.T) {
 		t.Errorf("expected receiver_token 'test_offer', got %q", connectResp.ReceiverToken)
 	}
 }
+
+func TestSessionExpiration(t *testing.T) {
+	server := NewSignallingServer()
+
+	// Register a session
+	reqBody := []byte(`{"receiver_token":"test_offer"}`)
+	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(reqBody))
+	rr := httptest.NewRecorder()
+	server.handleRegister(rr, req)
+
+	var registered struct {
+		SessionID string `json:"session_id"`
+	}
+	_ = json.NewDecoder(rr.Body).Decode(&registered)
+
+	// Verify session is active
+	server.mu.Lock()
+	session, exists := server.sessions[registered.SessionID]
+	server.mu.Unlock()
+	if !exists {
+		t.Fatal("session was not registered")
+	}
+
+	// Set the expiration to the past to simulate expiration
+	server.mu.Lock()
+	session.ExpiresAt = time.Now().Add(-1 * time.Second)
+	server.mu.Unlock()
+
+	// Run Reap() and verify the session was cleaned up
+	reapedCount := server.Reap()
+	if reapedCount != 1 {
+		t.Errorf("expected 1 session to be reaped, got %d", reapedCount)
+	}
+
+	// Verify session is gone from the database
+	server.mu.Lock()
+	_, exists = server.sessions[registered.SessionID]
+	server.mu.Unlock()
+	if exists {
+		t.Error("expected session to be deleted after reap")
+	}
+
+	// Verify event channel was closed
+	select {
+	case _, ok := <-session.EventChan:
+		if ok {
+			t.Error("expected event channel to be closed by reaper")
+		}
+	default:
+		t.Error("expected event channel to be closed and readable")
+	}
+}
