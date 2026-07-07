@@ -7,6 +7,24 @@ A blazingly fast, zero-setup, peer-to-peer (P2P) file transfer tool powered by m
 
 ---
 
+## Installation
+
+Make sure you have [Go](https://go.dev/) installed, then run:
+
+```bash
+go install github.com/rawtxt/yeet@latest
+```
+
+Or build and install locally from source:
+
+```bash
+git clone https://github.com/rawtxt/yeet.git
+cd yeet
+go install
+```
+
+---
+
 ## Basic Usage
 
 NAT hole-punching and secure handshakes are handled automatically under the hood.
