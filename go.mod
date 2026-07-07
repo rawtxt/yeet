@@ -1,4 +1,4 @@
-module yeetaway.io
+module github.com/rawtxt/yeet
 
 go 1.26.4
 
