@@ -9,90 +9,101 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: yeet send <filename> OR yeet receive OR yeet signalling [addr]")
-		os.Exit(1)
+	// `yeet receive` or just `yeet` to receive
+	if len(os.Args) < 2 || os.Args[1] == "receive" {
+		runReceive()
+		return
 	}
 
-	switch role := os.Args[1]; role {
-	case "signalling":
+	// `./yeet signalling` to start custom signalling server
+	if os.Args[1] == "signalling" {
 		addr := ":8080"
 		if len(os.Args) >= 3 {
 			addr = os.Args[2]
 		}
-		server := NewSignallingServer()
-		if err := server.Start(addr); err != nil {
-			panic(err)
-		}
-	case "send":
-		if len(os.Args) < 3 {
-			fmt.Println("Usage: yeet send <filename>")
-			os.Exit(1)
-		}
-		filename := os.Args[2]
-
-		fmt.Printf("Enter 6-digit Session ID: ")
-		sessionID := readLine()
-
-		sender, err := NewSender(YeetSignallingServer, SessionID(sessionID))
-		if err != nil {
-			panic(err)
-		}
-		defer sender.Close()
-
-		fmt.Println("🔗 Connected to signalling server! Handshaking with receiver...")
-
-		if err := sender.Send(filename); err != nil {
-			panic(err)
-		}
-		fmt.Printf("\n✨ %s yeeted successfully!\n", filepath.Base(filename))
-
-	case "receive":
-		receiver, err := NewReceiver(YeetSignallingServer)
-		if err != nil {
-			panic(err)
-		}
-		defer receiver.Close()
-
-		fmt.Printf("🚀 Your 6-digit Session ID: %s\n", receiver.SessionID)
-		fmt.Println("⏳ Waiting for a sender to connect...")
-
-		senderName := <-receiver.SenderRequest()
-		fmt.Printf("\n🔔 Connection request from '%s'. Accept? (y/n): ", senderName)
-		answer := readLine()
-		if strings.ToLower(answer) != "y" && strings.ToLower(answer) != "yes" {
-			if err := receiver.RejectConnection(); err != nil {
-				fmt.Printf("❌ Error rejecting connection: %v\n", err)
-			}
-			fmt.Println("❌ Connection rejected.")
-			return
-		}
-
-		fmt.Println("🔗 Connection accepted! Establishing direct P2P link...")
-		if err := receiver.ApproveConnection(); err != nil {
-			panic(err)
-		}
-
-		senderToken := <-receiver.SenderAnswer()
-		if err := receiver.Connect(senderToken); err != nil {
-			panic(err)
-		}
-
-		tr := <-receiver.TransferRequest()
-		fmt.Printf("📦 Incoming file: %s (%s)\n", tr.FileName, formatSize(int64(tr.Size)))
-
-		if err := receiver.Accept(tr); err != nil {
-			panic(err)
-		}
-
-		fmt.Println("📥 Downloading...")
-
-		if err := <-receiver.Done(); err != nil {
-			fmt.Printf("❌ Error during transfer: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Printf("\n🎉 %s received successfully! Saved as %s.yeeted\n", tr.FileName, tr.FileName)
+		runSignalling(addr)
+		return
 	}
+
+	// `yeet send <filename>` or just `yeet <filename>` to send
+	filename := os.Args[1]
+	if os.Args[1] == "send" && len(os.Args) >= 3 {
+		filename = os.Args[2]
+	}
+
+	runSend(filename)
+}
+
+func runSignalling(addr string) {
+	server := NewSignallingServer()
+	if err := server.Start(addr); err != nil {
+		panic(err)
+	}
+}
+
+func runSend(filename string) {
+	fmt.Printf("Enter 6-digit Session ID: ")
+	sessionID := readLine()
+
+	sender, err := NewSender(YeetSignallingServer, SessionID(sessionID))
+	if err != nil {
+		panic(err)
+	}
+	defer sender.Close()
+
+	fmt.Println("🔗 Connected to signalling server! Handshaking with receiver...")
+
+	if err := sender.Send(filename); err != nil {
+		panic(err)
+	}
+	fmt.Printf("\n✨ %s yeeted successfully!\n", filepath.Base(filename))
+}
+
+func runReceive() {
+	receiver, err := NewReceiver(YeetSignallingServer)
+	if err != nil {
+		panic(err)
+	}
+	defer receiver.Close()
+
+	fmt.Printf("🚀 Your 6-digit Session ID: %s\n", receiver.SessionID)
+	fmt.Println("⏳ Waiting for a sender to connect...")
+
+	senderName := <-receiver.SenderRequest()
+	fmt.Printf("\n🔔 Connection request from '%s'. Accept? (y/n): ", senderName)
+	answer := readLine()
+	if strings.ToLower(answer) != "y" && strings.ToLower(answer) != "yes" {
+		if err := receiver.RejectConnection(); err != nil {
+			fmt.Printf("❌ Error rejecting connection: %v\n", err)
+		}
+		fmt.Println("❌ Connection rejected.")
+		return
+	}
+
+	fmt.Println("🔗 Connection accepted! Establishing direct P2P link...")
+	if err := receiver.ApproveConnection(); err != nil {
+		panic(err)
+	}
+
+	senderToken := <-receiver.SenderAnswer()
+	if err := receiver.Connect(senderToken); err != nil {
+		panic(err)
+	}
+
+	tr := <-receiver.TransferRequest()
+	fmt.Printf("📦 Incoming file: %s (%s)\n", tr.FileName, formatSize(int64(tr.Size)))
+
+	if err := receiver.Accept(tr); err != nil {
+		panic(err)
+	}
+
+	fmt.Println("📥 Downloading...")
+
+	if err := <-receiver.Done(); err != nil {
+		fmt.Printf("❌ Error during transfer: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("\n🎉 %s received successfully! Saved as %s.yeeted\n", tr.FileName, tr.FileName)
 }
 
 func formatSize(bytes int64) string {
