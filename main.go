@@ -33,7 +33,7 @@ func main() {
 		fmt.Printf("Enter 6-digit Session ID: ")
 		sessionID := readLine()
 
-		sender, err := NewSender("http://localhost:8080", SessionID(sessionID))
+		sender, err := NewSender(YeetSignallingServer, SessionID(sessionID))
 		if err != nil {
 			panic(err)
 		}
@@ -45,7 +45,7 @@ func main() {
 		fmt.Println("Sender done!")
 
 	case "receive":
-		receiver, err := NewReceiver("http://localhost:8080")
+		receiver, err := NewReceiver(YeetSignallingServer)
 		if err != nil {
 			panic(err)
 		}
