@@ -25,6 +25,7 @@ type Receiver struct {
 	hasAccepted         bool
 	activeFile          *os.File
 	bytesRemaining      int64
+	totalBytes          int64
 	doneChan            chan error
 
 	senderRequestChan chan string
@@ -124,13 +125,14 @@ func (r *Receiver) Accept(tr TransferRequest) error {
 		return fmt.Errorf("Accept: already accepted a transfer request in this session")
 	}
 
-	outName := tr.FileName + ".download"
+	outName := tr.FileName + ".yeeted"
 	file, err := os.Create(outName)
 	if err != nil {
 		return fmt.Errorf("Accept: failed to create output file: %w", err)
 	}
 	r.activeFile = file
 	r.bytesRemaining = int64(tr.Size)
+	r.totalBytes = int64(tr.Size)
 	r.hasAccepted = true
 
 	// log.Printf("Accepting transfer of %q (%d bytes) as %q\n", tr.FileName, tr.Size, outName)
@@ -284,13 +286,19 @@ func (r *Receiver) setupDataChannel() error {
 			r.mu.Lock()
 			r.bytesRemaining -= int64(n)
 			remaining := r.bytesRemaining
+			total := r.totalBytes
 			if remaining <= 0 {
 				r.activeFile.Close()
 				r.activeFile = nil
 			}
 			r.mu.Unlock()
 
+			written := total - remaining
+			percent := float64(written) / float64(total) * 100
+			fmt.Printf("\r📥 Downloading... %.1f%% (%s / %s)", percent, formatSize(written), formatSize(total))
+
 			if remaining <= 0 {
+				fmt.Println()
 				// log.Printf("Transfer complete! Received all bytes. Sending completion acknowledgment...\n")
 				if err := r.dc.SendText("done"); err != nil {
 					// log.Printf("Warning: failed to send completion acknowledgment: %v\n", err)

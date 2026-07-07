@@ -121,7 +121,7 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
 		t.Fatalf("receiver timed out")
 	}
 
-	destPath := "source.bin.download"
+	destPath := "source.bin.yeeted"
 	defer os.Remove(destPath)
 
 	destContent, err := os.ReadFile(destPath)

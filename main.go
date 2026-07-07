@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -39,10 +40,12 @@ func main() {
 		}
 		defer sender.Close()
 
+		fmt.Println("🔗 Connected to signalling server! Handshaking with receiver...")
+
 		if err := sender.Send(filename); err != nil {
 			panic(err)
 		}
-		fmt.Println("Sender done!")
+		fmt.Printf("\n✨ %s yeeted successfully!\n", filepath.Base(filename))
 
 	case "receive":
 		receiver, err := NewReceiver(YeetSignallingServer)
@@ -51,21 +54,21 @@ func main() {
 		}
 		defer receiver.Close()
 
-		fmt.Printf("Your 6-digit Session ID: %s\n", receiver.SessionID)
-		fmt.Println("Waiting for a sender to connect...")
+		fmt.Printf("🚀 Your 6-digit Session ID: %s\n", receiver.SessionID)
+		fmt.Println("⏳ Waiting for a sender to connect...")
 
 		senderName := <-receiver.SenderRequest()
-		fmt.Printf("\nIncoming connection request from '%s'. Accept? (y/n): ", senderName)
+		fmt.Printf("\n🔔 Connection request from '%s'. Accept? (y/n): ", senderName)
 		answer := readLine()
 		if strings.ToLower(answer) != "y" && strings.ToLower(answer) != "yes" {
 			if err := receiver.RejectConnection(); err != nil {
-				fmt.Printf("Error rejecting connection: %v\n", err)
+				fmt.Printf("❌ Error rejecting connection: %v\n", err)
 			}
-			fmt.Println("Connection rejected.")
+			fmt.Println("❌ Connection rejected.")
 			return
 		}
 
-		fmt.Println("Accepting connection, establishing P2P link...")
+		fmt.Println("🔗 Connection accepted! Establishing direct P2P link...")
 		if err := receiver.ApproveConnection(); err != nil {
 			panic(err)
 		}
@@ -76,19 +79,33 @@ func main() {
 		}
 
 		tr := <-receiver.TransferRequest()
-		fmt.Printf("Received transfer request for %s (%d bytes)\n", tr.FileName, tr.Size)
+		fmt.Printf("📦 Incoming file: %s (%s)\n", tr.FileName, formatSize(int64(tr.Size)))
 
-		fmt.Println("Accepting transfer request...")
 		if err := receiver.Accept(tr); err != nil {
 			panic(err)
 		}
 
+		fmt.Println("📥 Downloading...")
+
 		if err := <-receiver.Done(); err != nil {
-			fmt.Printf("Error during transfer: %v\n", err)
+			fmt.Printf("❌ Error during transfer: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Receiver done! File successfully saved as %s.download\n", tr.FileName)
+		fmt.Printf("\n🎉 %s received successfully! Saved as %s.yeeted\n", tr.FileName, tr.FileName)
 	}
+}
+
+func formatSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
 func readLine() string {

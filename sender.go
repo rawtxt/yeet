@@ -196,6 +196,8 @@ func (s *Sender) Send(filename string) error {
 				return fmt.Errorf("Send: failed to send chunk: %w", err)
 			}
 			totalSent += int64(n)
+			percent := float64(totalSent) / float64(stat.Size()) * 100
+			fmt.Printf("\r📤 Yeeting... %.1f%% (%s / %s)", percent, formatSize(totalSent), formatSize(stat.Size()))
 			// log.Printf("Progress: %d / %d bytes sent (%.2f%%)\n", totalSent, stat.Size(), float64(totalSent)/float64(stat.Size())*100)
 		}
 		if err != nil {
@@ -205,6 +207,7 @@ func (s *Sender) Send(filename string) error {
 			return fmt.Errorf("Send: failed reading file: %w", err)
 		}
 	}
+	fmt.Println()
 
 	// log.Println("File sent completely! Waiting for receiver confirmation...")
 
