@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -134,7 +133,7 @@ func (r *Receiver) Accept(tr TransferRequest) error {
 	r.bytesRemaining = int64(tr.Size)
 	r.hasAccepted = true
 
-	log.Printf("Accepting transfer of %q (%d bytes) as %q\n", tr.FileName, tr.Size, outName)
+	// log.Printf("Accepting transfer of %q (%d bytes) as %q\n", tr.FileName, tr.Size, outName)
 	return r.dc.SendText(fmt.Sprintf("accept %q", tr.FileName))
 }
 
@@ -174,7 +173,8 @@ func (r *Receiver) listenToEvents() {
 	url := fmt.Sprintf("%s/events?session_id=%s&token=%s", r.serverURL, r.SessionID, r.SecretToken)
 	resp, err := http.Get(url)
 	if err != nil {
-		log.Printf("SSE: connection failed: %v\n", err)
+		// log.Printf("SSE: connection failed: %v\n", err)
+		r.doneChan <- fmt.Errorf("SSE connection failed: %w", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -198,7 +198,8 @@ func (r *Receiver) listenToEvents() {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		log.Printf("SSE: stream read error: %v\n", err)
+		// log.Printf("SSE: stream read error: %v\n", err)
+		r.doneChan <- fmt.Errorf("SSE stream read error: %w", err)
 	}
 }
 
@@ -232,19 +233,16 @@ func (r *Receiver) RejectConnection() error {
 
 func (r *Receiver) setupDataChannel() error {
 	r.dc.OnOpen(func() {
-		log.Println("Data channel opened")
+		// log.Println("Data channel opened")
 	})
-
 	r.dc.OnClose(func() {
-		log.Println("Data channel closed")
+		// log.Println("Data channel closed")
 	})
-
 	r.dc.OnBufferedAmountLow(func() {
-		log.Println("Data channel buffered amount low")
+		// log.Println("Data channel buffered amount low")
 	})
-
 	r.dc.OnDial(func() {
-		log.Println("Data channel onDial")
+		// log.Println("Data channel onDial")
 	})
 
 	r.dc.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -254,14 +252,15 @@ func (r *Receiver) setupDataChannel() error {
 			r.mu.Unlock()
 
 			if alreadyAccepted {
-				log.Printf("receiver received metadata message, but a transfer has already been accepted; ignoring subsequent request.\n")
+				// log.Printf("receiver received metadata message, but a transfer has already been accepted; ignoring subsequent request.\n")
 				return
 			}
 
-			log.Printf("receiver received metadata message\n")
+			// log.Printf("receiver received metadata message\n")
 			tr, err := UnmarshalTransferRequest(msg)
 			if err != nil {
-				log.Printf("unmarshalling transfer request failed: %s", err)
+				// log.Printf("unmarshalling transfer request failed: %s", err)
+				r.doneChan <- fmt.Errorf("unmarshalling transfer request failed: %w", err)
 				return
 			}
 
@@ -272,13 +271,13 @@ func (r *Receiver) setupDataChannel() error {
 			r.mu.Unlock()
 
 			if file == nil {
-				log.Printf("receiver received binary data chunk but no active file download!\n")
+				// log.Printf("receiver received binary data chunk but no active file download!\n")
 				return
 			}
 			n, err := file.Write(msg.Data)
 			if err != nil {
-				log.Printf("failed to write to file: %s", err)
-				r.doneChan <- err
+				// log.Printf("failed to write to file: %s", err)
+				r.doneChan <- fmt.Errorf("failed to write to file: %w", err)
 				return
 			}
 
@@ -292,9 +291,9 @@ func (r *Receiver) setupDataChannel() error {
 			r.mu.Unlock()
 
 			if remaining <= 0 {
-				log.Printf("Transfer complete! Received all bytes. Sending completion acknowledgment...\n")
+				// log.Printf("Transfer complete! Received all bytes. Sending completion acknowledgment...\n")
 				if err := r.dc.SendText("done"); err != nil {
-					log.Printf("Warning: failed to send completion acknowledgment: %v\n", err)
+					// log.Printf("Warning: failed to send completion acknowledgment: %v\n", err)
 				}
 
 				// Wait 200ms before triggering Done to ensure the "done" packet is flushed out of WebRTC network queues
@@ -307,7 +306,7 @@ func (r *Receiver) setupDataChannel() error {
 	})
 
 	r.dc.OnError(func(err error) {
-		log.Printf("Data channel error: %s", err)
+		// log.Printf("Data channel error: %s", err)
 	})
 
 	return nil

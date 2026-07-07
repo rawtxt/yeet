@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"os/user"
@@ -38,7 +37,7 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 
 	senderName := fmt.Sprintf("%s@%s", username, hostname)
 
-	log.Printf("Connecting to signalling server, requesting connection to receiver %s as '%s'...\n", sessionID, senderName)
+	// log.Printf("Connecting to signalling server, requesting connection to receiver %s as '%s'...\n", sessionID, senderName)
 	reqBody, err := json.Marshal(map[string]string{
 		"sender_name": senderName,
 	})
@@ -77,7 +76,7 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 	}
 
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
-		log.Println("Received Data Channel", dc.Label())
+		// log.Println("Received Data Channel", dc.Label())
 		s.dc = dc
 		close(s.dataChannelReady)
 	})
@@ -98,7 +97,7 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 
 	<-webrtc.GatheringCompletePromise(pc)
 
-	log.Println("Submitting connection answer to signalling server...")
+	// log.Println("Submitting connection answer to signalling server...")
 	localAnswer := s.LocalToken()
 	answerReqBody, err := json.Marshal(map[string]string{
 		"sender_token": localAnswer,
@@ -134,10 +133,10 @@ func (s *Sender) Close() {
 }
 
 func (s *Sender) Send(filename string) error {
-	log.Println("Waiting for PeerConnection to establish data channel...")
+	// log.Println("Waiting for PeerConnection to establish data channel...")
 	select {
 	case <-s.dataChannelReady:
-		log.Println("Data channel established successfully!")
+		// log.Println("Data channel established successfully!")
 	case <-time.After(30 * time.Second):
 		return fmt.Errorf("Send: timed out waiting for connection from receiver")
 	}
@@ -154,13 +153,12 @@ func (s *Sender) Send(filename string) error {
 	}
 
 	baseName := filepath.Base(filename)
-	log.Printf("Preparing to send %q (%d bytes)\n", baseName, stat.Size())
+	// log.Printf("Preparing to send %q (%d bytes)\n", baseName, stat.Size())
 
 	acceptanceWaiter := make(chan struct{})
 	s.dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 		if msg.IsString && string(msg.Data) == fmt.Sprintf("accept %q", baseName) {
 			// once receiver accepts, we can then send
-			log.Println("got 'accept' from receiver")
 			close(acceptanceWaiter)
 		}
 	})
@@ -175,13 +173,13 @@ func (s *Sender) Send(filename string) error {
 		return fmt.Errorf("Send: %w", err)
 	}
 
-	log.Println("Sending transfer request to receiver")
+	// log.Println("Sending transfer request to receiver")
 	if err := s.dc.SendText(string(bytes)); err != nil {
 		return fmt.Errorf("Send: %w", err)
 	}
 
 	<-acceptanceWaiter
-	log.Printf("Got approval from receiver to send %q\n", baseName)
+	// log.Printf("Got approval from receiver to send %q\n", baseName)
 
 	buffer := make([]byte, 16*1024)
 	totalSent := int64(0)
@@ -198,7 +196,7 @@ func (s *Sender) Send(filename string) error {
 				return fmt.Errorf("Send: failed to send chunk: %w", err)
 			}
 			totalSent += int64(n)
-			log.Printf("Progress: %d / %d bytes sent (%.2f%%)\n", totalSent, stat.Size(), float64(totalSent)/float64(stat.Size())*100)
+			// log.Printf("Progress: %d / %d bytes sent (%.2f%%)\n", totalSent, stat.Size(), float64(totalSent)/float64(stat.Size())*100)
 		}
 		if err != nil {
 			if err == io.EOF {
@@ -208,18 +206,19 @@ func (s *Sender) Send(filename string) error {
 		}
 	}
 
-	log.Println("File sent completely! Waiting for receiver confirmation...")
+	// log.Println("File sent completely! Waiting for receiver confirmation...")
 
 	doneWaiter := make(chan struct{})
 	s.dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 		if msg.IsString && string(msg.Data) == "done" {
+			// log.Println("Receiver confirmed receipt of all bytes.")
 			close(doneWaiter)
 		}
 	})
 
 	select {
 	case <-doneWaiter:
-		log.Println("Receiver confirmed successful receipt of all bytes. Transfer complete!")
+		// log.Println("Receiver confirmed successful receipt of all bytes. Transfer complete!")
 	case <-time.After(15 * time.Second):
 		return fmt.Errorf("Send: timed out waiting for receiver completion acknowledgment")
 	}
