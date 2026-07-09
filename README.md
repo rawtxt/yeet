@@ -49,6 +49,13 @@ Fling your file into the void by specifying its name. Enter the receiver's code,
 yeet my_cat_photo.jpg
 ```
 
+### 3. Custom Signalling Node
+You can also run your own signalling server:
+
+```bash
+yeet -signalling -addr :8080
+```
+
 ---
 
 ## Future Ideas

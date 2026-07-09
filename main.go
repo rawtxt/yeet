@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,29 +10,36 @@ import (
 )
 
 func main() {
-	// `yeet receive` or just `yeet` to receive
-	if len(os.Args) < 2 || os.Args[1] == "receive" {
-		runReceive()
+	signalling := flag.Bool("signalling", false, "Start custom signalling server")
+	addr := flag.String("addr", ":8080", "Address for signalling server to listen on")
+	server := flag.String("server", YeetSignallingServer, "Custom signalling server URL")
+
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(flag.CommandLine.Output(), "To receive a file:\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-server <url>]\n\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(flag.CommandLine.Output(), "To send a file:\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-server <url>] <filename>\n\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(flag.CommandLine.Output(), "To start a custom signalling node:\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  %s -signalling [-addr <addr>]\n\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(flag.CommandLine.Output(), "Flags:\n")
+		flag.PrintDefaults()
+	}
+
+	flag.Parse()
+
+	if *signalling {
+		runSignalling(*addr)
 		return
 	}
 
-	// `./yeet signalling` to start custom signalling server
-	if os.Args[1] == "signalling" {
-		addr := ":8080"
-		if len(os.Args) >= 3 {
-			addr = os.Args[2]
-		}
-		runSignalling(addr)
+	args := flag.Args()
+	if len(args) == 0 {
+		runReceive(*server)
 		return
 	}
 
-	// `yeet send <filename>` or just `yeet <filename>` to send
-	filename := os.Args[1]
-	if os.Args[1] == "send" && len(os.Args) >= 3 {
-		filename = os.Args[2]
-	}
-
-	runSend(filename)
+	runSend(*server, args[0])
 }
 
 func runSignalling(addr string) {
@@ -41,11 +49,11 @@ func runSignalling(addr string) {
 	}
 }
 
-func runSend(filename string) {
+func runSend(serverURL, filename string) {
 	fmt.Printf("Enter 6-digit Session ID: ")
 	sessionID := readLine()
 
-	sender, err := NewSender(YeetSignallingServer, SessionID(sessionID))
+	sender, err := NewSender(serverURL, SessionID(sessionID))
 	if err != nil {
 		panic(err)
 	}
@@ -59,8 +67,8 @@ func runSend(filename string) {
 	fmt.Printf("\n✨ %s yeeted successfully!\n", filepath.Base(filename))
 }
 
-func runReceive() {
-	receiver, err := NewReceiver(YeetSignallingServer)
+func runReceive(serverURL string) {
+	receiver, err := NewReceiver(serverURL)
 	if err != nil {
 		panic(err)
 	}
