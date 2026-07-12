@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/hashicorp/mdns"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -19,6 +23,28 @@ type Sender struct {
 	pc               *webrtc.PeerConnection
 	dc               *webrtc.DataChannel
 	dataChannelReady chan struct{}
+}
+
+func DiscoverLocalServer(sessionID string) (string, error) {
+	entriesCh := make(chan *mdns.ServiceEntry, 4)
+	go func() {
+		params := mdns.DefaultParams("_yeet._tcp")
+		params.Entries = entriesCh
+		params.WantUnicastResponse = false
+		params.Timeout = 2 * time.Second
+		params.Logger = log.New(io.Discard, "", 0)
+		_ = mdns.Query(params)
+		close(entriesCh)
+	}()
+
+	for entry := range entriesCh {
+		if strings.HasPrefix(entry.Name, sessionID+".") {
+			if entry.AddrV4 != nil {
+				return fmt.Sprintf("http://%s:%d", entry.AddrV4.String(), entry.Port), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("local server not found")
 }
 
 func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
@@ -37,7 +63,6 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 
 	senderName := fmt.Sprintf("%s@%s", username, hostname)
 
-	// log.Printf("Connecting to signalling server, requesting connection to receiver %s as '%s'...\n", sessionID, senderName)
 	reqBody, err := json.Marshal(map[string]string{
 		"sender_name": senderName,
 	})
@@ -45,7 +70,32 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 		return nil, fmt.Errorf("NewSender: %w", err)
 	}
 
-	resp, err := http.Post(serverURL+"/connect?session_id="+string(sessionID), "application/json", bytes.NewReader(reqBody))
+	useSTUN := true
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{
+		Timeout: 2 * time.Second,
+	}).DialContext
+	transport.TLSHandshakeTimeout = 2 * time.Second
+
+	client := &http.Client{
+		Transport: transport,
+	}
+
+	resp, err := client.Post(serverURL+"/connect?session_id="+string(sessionID), "application/json", bytes.NewReader(reqBody))
+	if err != nil || resp.StatusCode == http.StatusNotFound {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		localURL, localErr := DiscoverLocalServer(string(sessionID))
+		if localErr == nil {
+			serverURL = localURL
+			useSTUN = false
+			resp, err = client.Post(serverURL+"/connect?session_id="+string(sessionID), "application/json", bytes.NewReader(reqBody))
+		} else {
+			return nil, fmt.Errorf("signalling server unreachable, and local network mDNS discovery failed to find session %s: %w", sessionID, localErr)
+		}
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("NewSender: server connect request failed: %w", err)
 	}
@@ -64,7 +114,7 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 		return nil, fmt.Errorf("NewSender: failed to parse response: %w", err)
 	}
 
-	pc, err := webrtc.NewPeerConnection(WebRTCConfig())
+	pc, err := webrtc.NewPeerConnection(WebRTCConfig(useSTUN))
 	if err != nil {
 		return nil, fmt.Errorf("NewSender: %w", err)
 	}
@@ -95,7 +145,10 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 		return nil, fmt.Errorf("NewSender: %w", err)
 	}
 
-	<-webrtc.GatheringCompletePromise(pc)
+	select {
+	case <-webrtc.GatheringCompletePromise(pc):
+	case <-time.After(2 * time.Second):
+	}
 
 	// log.Println("Submitting connection answer to signalling server...")
 	localAnswer := s.LocalToken()

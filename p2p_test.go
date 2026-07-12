@@ -13,7 +13,7 @@ import (
 func TestP2PFileTransfer(t *testing.T) {
 	server := NewSignallingServer()
 	go func() {
-		_ = server.Start(":18080")
+		_, _ = server.Start(":18080")
 	}()
 	// Give the server a few milliseconds to start up
 	time.Sleep(50 * time.Millisecond)

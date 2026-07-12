@@ -5,12 +5,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/hashicorp/mdns"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -30,10 +35,19 @@ type Receiver struct {
 
 	senderRequestChan chan string
 	senderAnswerChan  chan string
+
+	localServer *SignallingServer
+	mdnsServer  *mdns.Server
 }
 
 func NewReceiver(serverURL string) (*Receiver, error) {
-	pc, err := webrtc.NewPeerConnection(WebRTCConfig())
+	useSTUN := true
+	client := http.Client{Timeout: 200 * time.Millisecond}
+	if _, err := client.Get(serverURL); err != nil {
+		useSTUN = false
+	}
+
+	pc, err := webrtc.NewPeerConnection(WebRTCConfig(useSTUN))
 	if err != nil {
 		return nil, fmt.Errorf("NewReceiver: %w", err)
 	}
@@ -66,13 +80,57 @@ func NewReceiver(serverURL string) (*Receiver, error) {
 		return nil, fmt.Errorf("NewReceiver: %w", err)
 	}
 
-	<-webrtc.GatheringCompletePromise(pc)
-
-	if err := r.registerSession(); err != nil {
-		return nil, fmt.Errorf("NewReceiver: register failed: %w", err)
+	select {
+	case <-webrtc.GatheringCompletePromise(pc):
+	case <-time.After(2 * time.Second):
 	}
 
+	localServer := NewSignallingServer()
+	actualAddr, err := localServer.Start("0.0.0.0:0")
+	if err != nil {
+		return nil, fmt.Errorf("NewReceiver: failed to start local signalling server: %w", err)
+	}
+	r.localServer = localServer
+
+	_, portStr, err := net.SplitHostPort(actualAddr)
+	if err != nil {
+		return nil, fmt.Errorf("NewReceiver: failed to parse local server port: %w", err)
+	}
+
+	if err := r.registerSession(); err != nil {
+		r.SessionID = SessionID(generateSessionID())
+		r.SecretToken = generateSecretToken()
+		r.serverURL = "http://127.0.0.1:" + portStr
+	}
+
+	localServer.AddSession(string(r.SessionID), r.SecretToken, r.LocalToken())
+
 	go r.listenToEvents()
+
+	if port, err := strconv.Atoi(portStr); err == nil {
+		host, _ := os.Hostname()
+		service, err := mdns.NewMDNSService(
+			string(r.SessionID),
+			"_yeet._tcp",
+			"",
+			host+".",
+			port,
+			nil,
+			[]string{"yeet local signalling"},
+		)
+		if err == nil {
+			mdnsServer, err := mdns.NewServer(&mdns.Config{
+				Zone:   service,
+				Logger: log.New(io.Discard, "", 0),
+			})
+			if err == nil {
+				r.mdnsServer = mdnsServer
+				// log.Printf("dbg: Started local mDNS server advertising %s._yeet._tcp on port %d\n", r.SessionID, port)
+			} else {
+				// log.Printf("dbg: Failed to start local mDNS server: %v\n", err)
+			}
+		}
+	}
 
 	return r, nil
 }
@@ -98,6 +156,10 @@ func (r *Receiver) Close() {
 
 	if r.pc != nil {
 		r.pc.Close()
+	}
+
+	if r.mdnsServer != nil {
+		r.mdnsServer.Shutdown()
 	}
 }
 
@@ -148,7 +210,8 @@ func (r *Receiver) registerSession() error {
 		return err
 	}
 
-	resp, err := http.Post(r.serverURL+"/register", "application/json", bytes.NewReader(reqBody))
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Post(r.serverURL+"/register", "application/json", bytes.NewReader(reqBody))
 	if err != nil {
 		return err
 	}

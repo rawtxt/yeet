@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	mrand "math/rand/v2"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -32,7 +33,25 @@ func NewSignallingServer() *SignallingServer {
 	}
 }
 
-func (s *SignallingServer) Start(addr string) error {
+func (s *SignallingServer) AddSession(sessionID, secretToken, receiverToken string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.addSessionLocked(sessionID, secretToken, receiverToken)
+}
+
+func (s *SignallingServer) addSessionLocked(sessionID, secretToken, receiverToken string) {
+	session := &Session{
+		ID:            sessionID,
+		SecretToken:   secretToken,
+		ReceiverToken: receiverToken,
+		EventChan:     make(chan string, 10),
+		ApprovedChan:  make(chan bool, 1),
+		ExpiresAt:     time.Now().Add(5 * time.Minute),
+	}
+	s.sessions[sessionID] = session
+}
+
+func (s *SignallingServer) Start(addr string) (string, error) {
 	// Start background janitor to clean up expired sessions
 	go s.reapExpiredSessions()
 
@@ -43,8 +62,19 @@ func (s *SignallingServer) Start(addr string) error {
 	mux.HandleFunc("/approve", s.handleApprove)
 	mux.HandleFunc("/answer", s.handleAnswer)
 
-	log.Printf("Signalling server starting on %s\n", addr)
-	return http.ListenAndServe(addr, mux)
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return "", err
+	}
+
+	actualAddr := listener.Addr().String()
+	log.Printf("Signalling server starting on %s\n", actualAddr)
+
+	go func() {
+		_ = http.Serve(listener, mux)
+	}()
+
+	return actualAddr, nil
 }
 
 func (s *SignallingServer) Reap() int {
@@ -81,6 +111,10 @@ func generateSecretToken() string {
 	return hex.EncodeToString(b)
 }
 
+func generateSessionID() string {
+	return fmt.Sprintf("%06d", mrand.IntN(1000000))
+}
+
 func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -96,25 +130,16 @@ func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request
 	}
 
 	s.mu.Lock()
-	// Generate a unique 6-digit session ID
 	var sessionID string
 	for {
-		sessionID = fmt.Sprintf("%06d", mrand.IntN(1000000))
+		sessionID = generateSessionID()
 		if _, exists := s.sessions[sessionID]; !exists {
 			break
 		}
 	}
 
 	secretToken := generateSecretToken()
-	session := &Session{
-		ID:            sessionID,
-		SecretToken:   secretToken,
-		ReceiverToken: req.ReceiverToken,
-		EventChan:     make(chan string, 10),
-		ApprovedChan:  make(chan bool, 1),
-		ExpiresAt:     time.Now().Add(5 * time.Minute), // Sessions expire in 5 minutes
-	}
-	s.sessions[sessionID] = session
+	s.addSessionLocked(sessionID, secretToken, req.ReceiverToken)
 	s.mu.Unlock()
 
 	log.Printf("[Server] Registered session %s (secure token generated)\n", sessionID)

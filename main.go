@@ -44,9 +44,12 @@ func main() {
 
 func runSignalling(addr string) {
 	server := NewSignallingServer()
-	if err := server.Start(addr); err != nil {
-		panic(err)
+	_, err := server.Start(addr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error starting signalling server: %v\n", err)
+		os.Exit(1)
 	}
+	select {}
 }
 
 func runSend(serverURL, filename string) {
@@ -55,14 +58,22 @@ func runSend(serverURL, filename string) {
 
 	sender, err := NewSender(serverURL, SessionID(sessionID))
 	if err != nil {
-		panic(err)
+		errStr := err.Error()
+		if strings.Contains(errStr, "no such host") || strings.Contains(errStr, "unreachable") {
+			fmt.Fprintf(os.Stderr, "❌ Error: Signalling server unreachable (offline or DNS failed).\n")
+			fmt.Fprintf(os.Stderr, "💡 Tip: Check your internet connection, or make sure the receiver is running on the same local network (LAN) and has generated Session ID %s.\n", sessionID)
+		} else {
+			fmt.Fprintf(os.Stderr, "❌ Error: %v\n", err)
+		}
+		os.Exit(1)
 	}
 	defer sender.Close()
 
 	fmt.Println("🔗 Connected to signalling server! Handshaking with receiver...")
 
 	if err := sender.Send(filename); err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "❌ Error sending file: %v\n", err)
+		os.Exit(1)
 	}
 	fmt.Printf("\n✨ %s yeeted successfully!\n", filepath.Base(filename))
 }
@@ -70,7 +81,8 @@ func runSend(serverURL, filename string) {
 func runReceive(serverURL string) {
 	receiver, err := NewReceiver(serverURL)
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "❌ Error starting receiver: %v\n", err)
+		os.Exit(1)
 	}
 	defer receiver.Close()
 
@@ -90,19 +102,22 @@ func runReceive(serverURL string) {
 
 	fmt.Println("🔗 Connection accepted! Establishing direct P2P link...")
 	if err := receiver.ApproveConnection(); err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "❌ Error accepting connection: %v\n", err)
+		os.Exit(1)
 	}
 
 	senderToken := <-receiver.SenderAnswer()
 	if err := receiver.Connect(senderToken); err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "❌ Error establishing connection: %v\n", err)
+		os.Exit(1)
 	}
 
 	tr := <-receiver.TransferRequest()
 	fmt.Printf("📦 Incoming file: %s (%s)\n", tr.FileName, formatSize(int64(tr.Size)))
 
 	if err := receiver.Accept(tr); err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "❌ Error accepting file transfer: %v\n", err)
+		os.Exit(1)
 	}
 
 	fmt.Println("📥 Downloading...")
@@ -131,7 +146,8 @@ func readLine() string {
 	reader := bufio.NewReader(os.Stdin)
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "❌ Error reading input: %v\n", err)
+		os.Exit(1)
 	}
 	return strings.TrimSpace(line)
 }
