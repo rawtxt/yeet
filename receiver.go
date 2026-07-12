@@ -86,6 +86,7 @@ func NewReceiver(serverURL string) (*Receiver, error) {
 	}
 
 	localServer := NewSignallingServer()
+	localServer.Silent = true
 	actualAddr, err := localServer.Start("0.0.0.0:0")
 	if err != nil {
 		return nil, fmt.Errorf("NewReceiver: failed to start local signalling server: %w", err)

@@ -25,11 +25,18 @@ type Session struct {
 type SignallingServer struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
+	Silent   bool
 }
 
 func NewSignallingServer() *SignallingServer {
 	return &SignallingServer{
 		sessions: make(map[string]*Session),
+	}
+}
+
+func (s *SignallingServer) logf(format string, v ...any) {
+	if !s.Silent {
+		log.Printf(format, v...)
 	}
 }
 
@@ -68,7 +75,7 @@ func (s *SignallingServer) Start(addr string) (string, error) {
 	}
 
 	actualAddr := listener.Addr().String()
-	log.Printf("Signalling server starting on %s\n", actualAddr)
+	s.logf("Signalling server starting on %s\n", actualAddr)
 
 	go func() {
 		_ = http.Serve(listener, mux)
@@ -98,7 +105,7 @@ func (s *SignallingServer) reapExpiredSessions() {
 	for range ticker.C {
 		reapedCount := s.Reap()
 		if reapedCount > 0 {
-			log.Printf("[Server] Cleaned up %d expired sessions\n", reapedCount)
+			s.logf("[Server] Cleaned up %d expired sessions\n", reapedCount)
 		}
 	}
 }
@@ -142,7 +149,7 @@ func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request
 	s.addSessionLocked(sessionID, secretToken, req.ReceiverToken)
 	s.mu.Unlock()
 
-	log.Printf("[Server] Registered session %s (secure token generated)\n", sessionID)
+	s.logf("[Server] Registered session %s (secure token generated)\n", sessionID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
@@ -189,7 +196,7 @@ func (s *SignallingServer) handleEvents(w http.ResponseWriter, r *http.Request) 
 	fmt.Fprintf(w, "data: connected\n\n")
 	flusher.Flush()
 
-	log.Printf("[Server] Session %s opened SSE stream\n", sessionID)
+	s.logf("[Server] Session %s opened SSE stream\n", sessionID)
 
 	for {
 		select {
@@ -200,7 +207,7 @@ func (s *SignallingServer) handleEvents(w http.ResponseWriter, r *http.Request) 
 			fmt.Fprintf(w, "data: %s\n\n", event)
 			flusher.Flush()
 		case <-r.Context().Done():
-			log.Printf("[Server] Session %s closed SSE stream\n", sessionID)
+			s.logf("[Server] Session %s closed SSE stream\n", sessionID)
 			s.mu.Lock()
 			delete(s.sessions, sessionID)
 			s.mu.Unlock()
@@ -241,30 +248,30 @@ func (s *SignallingServer) handleConnect(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	log.Printf("[Server] Sender '%s' requesting connection to session %s\n", req.SenderName, sessionID)
+	s.logf("[Server] Sender '%s' requesting connection to session %s\n", req.SenderName, sessionID)
 
 	// Notify receiver that a sender wants to connect (include sender name)
 	select {
 	case session.EventChan <- fmt.Sprintf("sender_request %s", req.SenderName):
 	default:
-		log.Printf("[Server] Warning: session %s event channel full\n", sessionID)
+		s.logf("[Server] Warning: session %s event channel full\n", sessionID)
 	}
 
 	// Wait for receiver's approval (timeout after 30 seconds)
 	select {
 	case approved := <-session.ApprovedChan:
 		if approved {
-			log.Printf("[Server] Connection approved for session %s\n", sessionID)
+			s.logf("[Server] Connection approved for session %s\n", sessionID)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{
 				"receiver_token": session.ReceiverToken,
 			})
 		} else {
-			log.Printf("[Server] Connection rejected for session %s\n", sessionID)
+			s.logf("[Server] Connection rejected for session %s\n", sessionID)
 			http.Error(w, "Connection rejected by receiver", http.StatusForbidden)
 		}
 	case <-time.After(30 * time.Second):
-		log.Printf("[Server] Connection request timed out for session %s\n", sessionID)
+		s.logf("[Server] Connection request timed out for session %s\n", sessionID)
 		http.Error(w, "Request timed out waiting for approval", http.StatusRequestTimeout)
 	}
 }
@@ -337,12 +344,12 @@ func (s *SignallingServer) handleAnswer(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	log.Printf("[Server] Forwarding sender's answer token to session %s\n", sessionID)
+	s.logf("[Server] Forwarding sender's answer token to session %s\n", sessionID)
 
 	select {
 	case session.EventChan <- fmt.Sprintf("sender_answer %s", req.SenderToken):
 	default:
-		log.Printf("[Server] Warning: session %s event channel full\n", sessionID)
+		s.logf("[Server] Warning: session %s event channel full\n", sessionID)
 	}
 
 	w.WriteHeader(http.StatusOK)
