@@ -8,7 +8,7 @@ import (
 
 const DataChannelLabel = "yeet-channel"
 
-const YeetSignallingServer = "https://yeet-signalling.fly.dev/"
+const YeetSignallingServer = "https://yeet-signalling.fly.dev"
 
 func WebRTCConfig(useSTUN bool) webrtc.Configuration {
 	if !useSTUN {
