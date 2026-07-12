@@ -36,8 +36,9 @@ type Receiver struct {
 	senderRequestChan chan string
 	senderAnswerChan  chan string
 
-	localServer *SignallingServer
-	mdnsServer  *mdns.Server
+	localServer    *SignallingServer
+	mdnsServer     *mdns.Server
+	LocalServerURL string
 }
 
 func NewReceiver(serverURL string) (*Receiver, error) {
@@ -97,6 +98,7 @@ func NewReceiver(serverURL string) (*Receiver, error) {
 	if err != nil {
 		return nil, fmt.Errorf("NewReceiver: failed to parse local server port: %w", err)
 	}
+	r.LocalServerURL = "http://127.0.0.1:" + portStr
 
 	if err := r.registerSession(); err != nil {
 		r.SessionID = SessionID(generateSessionID())
