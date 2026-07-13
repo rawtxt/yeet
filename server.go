@@ -128,6 +128,8 @@ func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 10240)
+
 	var req struct {
 		ReceiverToken string `json:"receiver_token"`
 	}
@@ -221,6 +223,8 @@ func (s *SignallingServer) handleConnect(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 
 	sessionID := r.URL.Query().Get("session_id")
 	if sessionID == "" {
@@ -320,6 +324,8 @@ func (s *SignallingServer) handleAnswer(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 10240)
 
 	sessionID := r.URL.Query().Get("session_id")
 	if sessionID == "" {
