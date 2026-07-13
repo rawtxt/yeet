@@ -106,7 +106,11 @@ func NewReceiver(serverURL string) (*Receiver, error) {
 		r.serverURL = "http://127.0.0.1:" + portStr
 	}
 
-	localServer.AddSession(string(r.SessionID), r.SecretToken, r.LocalToken())
+	tok, err := r.LocalToken()
+	if err != nil {
+		return nil, fmt.Errorf("NewReceiver: failed to encode local token: %w", err)
+	}
+	localServer.AddSession(string(r.SessionID), r.SecretToken, tok)
 
 	go r.listenToEvents()
 
@@ -138,12 +142,16 @@ func NewReceiver(serverURL string) (*Receiver, error) {
 	return r, nil
 }
 
-func (r *Receiver) LocalToken() string {
+func (r *Receiver) LocalToken() (string, error) {
 	return encodeSDP(*r.pc.LocalDescription())
 }
 
 func (r *Receiver) Connect(senderToken string) error {
-	return r.pc.SetRemoteDescription(decodeSDP(senderToken))
+	desc, err := decodeSDP(senderToken)
+	if err != nil {
+		return fmt.Errorf("failed to decode sender token: %w", err)
+	}
+	return r.pc.SetRemoteDescription(desc)
 }
 
 func (r *Receiver) Close() {
@@ -205,7 +213,10 @@ func (r *Receiver) Accept(tr TransferRequest) error {
 }
 
 func (r *Receiver) registerSession() error {
-	localToken := r.LocalToken()
+	localToken, err := r.LocalToken()
+	if err != nil {
+		return err
+	}
 	reqBody, err := json.Marshal(map[string]string{
 		"receiver_token": localToken,
 	})

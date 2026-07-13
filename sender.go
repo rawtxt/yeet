@@ -131,7 +131,10 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 		close(s.dataChannelReady)
 	})
 
-	receiverSD := decodeSDP(res.ReceiverToken)
+	receiverSD, err := decodeSDP(res.ReceiverToken)
+	if err != nil {
+		return nil, fmt.Errorf("NewSender: failed to decode receiver token: %w", err)
+	}
 	if err := pc.SetRemoteDescription(receiverSD); err != nil {
 		return nil, fmt.Errorf("NewSender: %w", err)
 	}
@@ -151,7 +154,10 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 	}
 
 	// log.Println("Submitting connection answer to signalling server...")
-	localAnswer := s.LocalToken()
+	localAnswer, err := s.LocalToken()
+	if err != nil {
+		return nil, fmt.Errorf("NewSender: failed to encode local token: %w", err)
+	}
 	answerReqBody, err := json.Marshal(map[string]string{
 		"sender_token": localAnswer,
 	})
@@ -172,7 +178,7 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 	return s, nil
 }
 
-func (s *Sender) LocalToken() string {
+func (s *Sender) LocalToken() (string, error) {
 	return encodeSDP(*s.pc.LocalDescription())
 }
 
