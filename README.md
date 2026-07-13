@@ -3,7 +3,7 @@
 Fast, zero-setup, peer-to-peer (P2P) file transfer tool powered by WebRTC.
 
 > [!WARNING]  
-> ⚠️ **Under Construction:** Wear a hard hat and expect flying objects! Absolutely not ready for production yet.
+> ⚠️ **Under Construction:** This is not yet stable.
 
 ---
 
@@ -11,7 +11,7 @@ Fast, zero-setup, peer-to-peer (P2P) file transfer tool powered by WebRTC.
 
 `yeet` is a fast, zero-setup, peer-to-peer (P2P) file transfer tool powered by modern WebRTC. NAT hole-punching and secure handshakes are handled automatically under the hood.
 
-When operating without an internet connection, `yeet` seamlessly falls back to offline mode. The receiver automatically spins up a local signalling node and advertises itself over the local network via mDNS, allowing the sender to discover and connect directly over LAN with zero configuration.
+`yeet` also works without an internet connection. If you are on the same Wi-Fi, `yeet` automatically switches to local offline mode to find your peer and transfer files with zero setup.
 
 ---
 

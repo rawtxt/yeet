@@ -114,31 +114,6 @@ func (s *SignallingServer) reapExpiredSessions() {
 	}
 }
 
-func generateSecretToken() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		panic(err) // crypto/rand shouldn't fail
-	}
-	return hex.EncodeToString(b)
-}
-
-func generateSessionID() string {
-	return fmt.Sprintf("%06d", mrand.IntN(1000000))
-}
-
-func sanitizeSenderName(name string) string {
-	var sb strings.Builder
-	for _, r := range name {
-		if unicode.IsPrint(r) {
-			sb.WriteRune(r)
-		}
-		if sb.Len() >= 64 {
-			break
-		}
-	}
-	return sb.String()
-}
-
 func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -383,4 +358,29 @@ func (s *SignallingServer) handleAnswer(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func generateSecretToken() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic(err) // crypto/rand shouldn't fail
+	}
+	return hex.EncodeToString(b)
+}
+
+func generateSessionID() string {
+	return fmt.Sprintf("%06d", mrand.IntN(1000000))
+}
+
+func sanitizeSenderName(name string) string {
+	var sb strings.Builder
+	for _, r := range name {
+		if unicode.IsPrint(r) {
+			sb.WriteRune(r)
+		}
+		if sb.Len() >= 64 {
+			break
+		}
+	}
+	return sb.String()
 }
