@@ -92,7 +92,7 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 			useSTUN = false
 			resp, err = client.Post(serverURL+"/connect?session_id="+string(sessionID), "application/json", bytes.NewReader(reqBody))
 		} else {
-			return nil, fmt.Errorf("signalling server unreachable, and local network mDNS discovery failed to find session %s: %w", sessionID, localErr)
+			return nil, fmt.Errorf("session %s not found (server unreachable and local mDNS failed): %w", sessionID, localErr)
 		}
 	}
 

@@ -23,14 +23,16 @@ type Session struct {
 }
 
 type SignallingServer struct {
-	mu       sync.Mutex
-	sessions map[string]*Session
-	Silent   bool
+	mu          sync.Mutex
+	sessions    map[string]*Session
+	Silent      bool
+	MaxSessions int
 }
 
 func NewSignallingServer() *SignallingServer {
 	return &SignallingServer{
-		sessions: make(map[string]*Session),
+		sessions:    make(map[string]*Session),
+		MaxSessions: 10000,
 	}
 }
 
@@ -139,6 +141,12 @@ func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request
 	}
 
 	s.mu.Lock()
+	if len(s.sessions) >= s.MaxSessions {
+		s.mu.Unlock()
+		http.Error(w, "Server is at full capacity", http.StatusServiceUnavailable)
+		return
+	}
+
 	var sessionID string
 	for {
 		sessionID = generateSessionID()

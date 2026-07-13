@@ -204,3 +204,27 @@ func TestSessionExpiration(t *testing.T) {
 		t.Error("expected event channel to be closed and readable")
 	}
 }
+
+func TestSignallingCapacityLimit(t *testing.T) {
+	server := NewSignallingServer()
+	server.MaxSessions = 2
+
+	for i := range 2 {
+		reqBody := []byte(`{"receiver_token":"token"}`)
+		req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(reqBody))
+		rr := httptest.NewRecorder()
+		server.handleRegister(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d on step %d", rr.Code, i)
+		}
+	}
+
+	reqBody := []byte(`{"receiver_token":"token"}`)
+	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(reqBody))
+	rr := httptest.NewRecorder()
+	server.handleRegister(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503 Service Unavailable, got %d", rr.Code)
+	}
+}
