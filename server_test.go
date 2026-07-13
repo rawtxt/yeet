@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -226,5 +227,28 @@ func TestSignallingCapacityLimit(t *testing.T) {
 
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected status 503 Service Unavailable, got %d", rr.Code)
+	}
+}
+
+func TestSanitizeSenderName(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"alice", "alice"},
+		{"bob@localhost", "bob@localhost"},
+		{"malicious\x1b[31mname", "malicious[31mname"},
+		{"佐藤", "佐藤"},
+		{"Anaïs", "Anaïs"},
+		{"name_with_spaces and_dots.1-2_3", "name_with_spaces and_dots.1-2_3"},
+		{"", ""},
+		{strings.Repeat("a", 100), strings.Repeat("a", 64)},
+	}
+
+	for _, tc := range tests {
+		actual := sanitizeSenderName(tc.input)
+		if actual != tc.expected {
+			t.Errorf("sanitizeSenderName(%q) = %q, expected %q", tc.input, actual, tc.expected)
+		}
 	}
 }

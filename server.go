@@ -9,8 +9,10 @@ import (
 	mrand "math/rand/v2"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 type Session struct {
@@ -122,6 +124,19 @@ func generateSecretToken() string {
 
 func generateSessionID() string {
 	return fmt.Sprintf("%06d", mrand.IntN(1000000))
+}
+
+func sanitizeSenderName(name string) string {
+	var sb strings.Builder
+	for _, r := range name {
+		if unicode.IsPrint(r) {
+			sb.WriteRune(r)
+		}
+		if sb.Len() >= 64 {
+			break
+		}
+	}
+	return sb.String()
 }
 
 func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -247,6 +262,7 @@ func (s *SignallingServer) handleConnect(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	req.SenderName = sanitizeSenderName(req.SenderName)
 	if req.SenderName == "" {
 		req.SenderName = "Unknown Sender"
 	}
