@@ -387,3 +387,151 @@ func TestP2PFileTransferE2E(t *testing.T) {
 		log.Println("Go Integration Test: Success! File transferred completely via deployed E2E signalling server.")
 	}
 }
+
+func TestP2PMultiFileTransferLocal(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "yeet-test-multi-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	files := []struct {
+		name    string
+		content []byte
+	}{
+		{"file1.bin", []byte("First file contents. Yay!")},
+		{"file2.bin", []byte("Second file contents. Dynamic, cool!")},
+		{"file3.bin", []byte("Third file contents. Extremely fast transfer, hopefully!")},
+	}
+
+	var srcPaths []string
+	for _, f := range files {
+		srcPath := filepath.Join(tmpDir, f.name)
+		if err := os.WriteFile(srcPath, f.content, 0644); err != nil {
+			t.Fatalf("failed to write test file %s: %v", f.name, err)
+		}
+		srcPaths = append(srcPaths, srcPath)
+	}
+
+	receiver, err := NewReceiver("http://127.0.0.1:55556")
+	if err != nil {
+		t.Fatalf("failed to create receiver: %v", err)
+	}
+	defer receiver.Close()
+
+	recvDone := make(chan error, 1)
+	go func() {
+		var senderName string
+		select {
+		case senderName = <-receiver.SenderRequest():
+			log.Printf("Test Multi-file Receiver: Received request from '%s'\n", senderName)
+		case <-time.After(5 * time.Second):
+			recvDone <- fmt.Errorf("timeout waiting for sender request")
+			return
+		}
+
+		if err := receiver.ApproveConnection(); err != nil {
+			recvDone <- fmt.Errorf("failed to approve: %w", err)
+			return
+		}
+
+		var senderToken string
+		select {
+		case senderToken = <-receiver.SenderAnswer():
+		case <-time.After(5 * time.Second):
+			recvDone <- fmt.Errorf("timeout waiting for sender answer")
+			return
+		}
+
+		if err := receiver.Connect(senderToken); err != nil {
+			recvDone <- fmt.Errorf("failed to connect receiver: %w", err)
+			return
+		}
+
+		for range files {
+			var tr TransferRequest
+			select {
+			case tr = <-receiver.TransferRequest():
+				log.Printf("Test Multi-file Receiver: Received transfer request for %s (%d bytes)\n", tr.FileName, tr.Size)
+			case <-time.After(5 * time.Second):
+				recvDone <- fmt.Errorf("timeout waiting for transfer request")
+				return
+			}
+
+			if err := receiver.Accept(tr); err != nil {
+				recvDone <- fmt.Errorf("failed to accept transfer: %w", err)
+				return
+			}
+
+			select {
+			case err := <-receiver.Done():
+				if err != nil {
+					recvDone <- err
+					return
+				}
+			case <-time.After(10 * time.Second):
+				recvDone <- fmt.Errorf("timeout waiting for transfer completion")
+				return
+			}
+		}
+
+		recvDone <- nil
+	}()
+
+	sendErrChan := make(chan error, 1)
+	go func() {
+		sender, err := NewSender(receiver.LocalServerURL, receiver.SessionID)
+		if err != nil {
+			sendErrChan <- fmt.Errorf("failed to create sender: %w", err)
+			return
+		}
+		defer sender.Close()
+
+		for _, srcPath := range srcPaths {
+			if err := sender.Send(srcPath); err != nil {
+				sendErrChan <- err
+				return
+			}
+		}
+		sendErrChan <- nil
+	}()
+
+	select {
+	case err := <-sendErrChan:
+		if err != nil {
+			t.Fatalf("sender failed: %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatalf("sender timed out")
+	}
+
+	select {
+	case err := <-recvDone:
+		if err != nil {
+			t.Fatalf("receiver failed: %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatalf("receiver timed out")
+	}
+
+	for _, f := range files {
+		destPath := f.name + ".yeeted"
+		defer os.Remove(destPath)
+
+		destContent, err := os.ReadFile(destPath)
+		if err != nil {
+			t.Fatalf("failed to read downloaded file %s: %v", destPath, err)
+		}
+
+		if string(destContent) != string(f.content) {
+			t.Errorf("content mismatch for %s!\nExpected: %q\nGot:      %q", f.name, f.content, destContent)
+		}
+
+		h1 := sha256.Sum256(f.content)
+		h2 := sha256.Sum256(destContent)
+		if h1 != h2 {
+			t.Errorf("SHA256 hashes do not match for %s!", f.name)
+		}
+	}
+	log.Println("Go Integration Test: Success! Multi-file local transfer completed.")
+}

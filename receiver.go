@@ -27,7 +27,6 @@ type Receiver struct {
 	pc                  *webrtc.PeerConnection
 	dc                  *webrtc.DataChannel
 	mu                  sync.Mutex
-	hasAccepted         bool
 	activeFile          *os.File
 	bytesRemaining      int64
 	totalBytes          int64
@@ -194,8 +193,8 @@ func (r *Receiver) Accept(tr TransferRequest) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.hasAccepted {
-		return fmt.Errorf("Accept: already accepted a transfer request in this session")
+	if r.activeFile != nil {
+		return fmt.Errorf("Accept: a transfer is already in progress")
 	}
 
 	outName := tr.FileName + ".yeeted"
@@ -206,7 +205,6 @@ func (r *Receiver) Accept(tr TransferRequest) error {
 	r.activeFile = file
 	r.bytesRemaining = int64(tr.Size)
 	r.totalBytes = int64(tr.Size)
-	r.hasAccepted = true
 
 	// log.Printf("Accepting transfer of %q (%d bytes) as %q\n", tr.FileName, tr.Size, outName)
 	return r.dc.SendText(fmt.Sprintf("accept %q", tr.FileName))
@@ -311,11 +309,19 @@ func (r *Receiver) RejectConnection() error {
 }
 
 func (r *Receiver) setupDataChannel() error {
+	var closeOnce sync.Once
+	closeChannels := func() {
+		closeOnce.Do(func() {
+			close(r.transferRequestChan)
+		})
+	}
+
 	r.dc.OnOpen(func() {
 		// log.Println("Data channel opened")
 	})
 	r.dc.OnClose(func() {
 		// log.Println("Data channel closed")
+		closeChannels()
 	})
 	r.dc.OnBufferedAmountLow(func() {
 		// log.Println("Data channel buffered amount low")
@@ -324,14 +330,20 @@ func (r *Receiver) setupDataChannel() error {
 		// log.Println("Data channel onDial")
 	})
 
+	r.pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
+		if s == webrtc.PeerConnectionStateClosed || s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateDisconnected {
+			closeChannels()
+		}
+	})
+
 	r.dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 		if msg.IsString {
 			r.mu.Lock()
-			alreadyAccepted := r.hasAccepted
+			isTransferring := r.activeFile != nil
 			r.mu.Unlock()
 
-			if alreadyAccepted {
-				// log.Printf("receiver received metadata message, but a transfer has already been accepted; ignoring subsequent request.\n")
+			if isTransferring {
+				// log.Printf("receiver received metadata message, but a transfer is already in progress; ignoring.\n")
 				return
 			}
 

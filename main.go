@@ -18,8 +18,8 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(flag.CommandLine.Output(), "To receive a file:\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-server <url>]\n\n", filepath.Base(os.Args[0]))
-		fmt.Fprintf(flag.CommandLine.Output(), "To send a file:\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-server <url>] <filename>\n\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(flag.CommandLine.Output(), "To send files:\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-server <url>] <filename1> [<filename2> ...]\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(flag.CommandLine.Output(), "To start a custom signalling node:\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  %s -signalling [-addr <addr>]\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(flag.CommandLine.Output(), "Flags:\n")
@@ -39,7 +39,7 @@ func main() {
 		return
 	}
 
-	runSend(*server, args[0])
+	runSend(*server, args)
 }
 
 func runSignalling(addr string) {
@@ -52,7 +52,7 @@ func runSignalling(addr string) {
 	select {}
 }
 
-func runSend(serverURL, filename string) {
+func runSend(serverURL string, filenames []string) {
 	fmt.Printf("Enter 6-digit Session ID: ")
 	sessionID := readLine()
 
@@ -71,11 +71,14 @@ func runSend(serverURL, filename string) {
 
 	fmt.Println("🔗 Connected to signalling server! Handshaking with receiver...")
 
-	if err := sender.Send(filename); err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error sending file: %v\n", err)
-		os.Exit(1)
+	for _, filename := range filenames {
+		fmt.Printf("Yeeting %s...\n", filepath.Base(filename))
+		if err := sender.Send(filename); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error sending file %s: %v\n", filename, err)
+			os.Exit(1)
+		}
+		fmt.Printf("\n✨ %s yeeted successfully!\n", filepath.Base(filename))
 	}
-	fmt.Printf("\n✨ %s yeeted successfully!\n", filepath.Base(filename))
 }
 
 func runReceive(serverURL string) {
@@ -112,21 +115,22 @@ func runReceive(serverURL string) {
 		os.Exit(1)
 	}
 
-	tr := <-receiver.TransferRequest()
-	fmt.Printf("📦 Incoming file: %s (%s)\n", tr.FileName, formatSize(int64(tr.Size)))
+	for tr := range receiver.TransferRequest() {
+		fmt.Printf("📦 Incoming file: %s (%s)\n", tr.FileName, formatSize(int64(tr.Size)))
 
-	if err := receiver.Accept(tr); err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error accepting file transfer: %v\n", err)
-		os.Exit(1)
+		if err := receiver.Accept(tr); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error accepting file transfer: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Println("📥 Downloading...")
+
+		if err := <-receiver.Done(); err != nil {
+			fmt.Printf("❌ Error during transfer: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("\n🎉 %s received successfully! Saved as %s.yeeted\n", tr.FileName, tr.FileName)
 	}
-
-	fmt.Println("📥 Downloading...")
-
-	if err := <-receiver.Done(); err != nil {
-		fmt.Printf("❌ Error during transfer: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("\n🎉 %s received successfully! Saved as %s.yeeted\n", tr.FileName, tr.FileName)
 }
 
 func formatSize(bytes int64) string {
