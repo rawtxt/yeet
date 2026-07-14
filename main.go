@@ -72,12 +72,10 @@ func runSend(serverURL string, filenames []string) {
 	fmt.Println("🔗 Connected to signalling server! Handshaking with receiver...")
 
 	for _, filename := range filenames {
-		fmt.Printf("Yeeting %s...\n", filepath.Base(filename))
 		if err := sender.Send(filename); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Error sending file %s: %v\n", filename, err)
+			fmt.Fprintf(os.Stderr, "\n❌ Error sending file %s: %v\n", filename, err)
 			os.Exit(1)
 		}
-		fmt.Printf("\n✨ %s yeeted successfully!\n", filepath.Base(filename))
 	}
 }
 
@@ -89,11 +87,11 @@ func runReceive(serverURL string) {
 	}
 	defer receiver.Close()
 
-	fmt.Printf("🚀 Your 6-digit Session ID: %s\n", receiver.SessionID)
-	fmt.Println("⏳ Waiting for a sender to connect...")
+	fmt.Printf("Your 6-digit Session ID: %s\n", receiver.SessionID)
+	fmt.Println("Waiting for a sender to connect...")
 
 	senderName := <-receiver.SenderRequest()
-	fmt.Printf("\n🔔 Connection request from '%s'. Accept? (y/n): ", senderName)
+	fmt.Printf("\nConnection request from '%s'. Accept? (y/n): ", senderName)
 	answer := readLine()
 	if strings.ToLower(answer) != "y" && strings.ToLower(answer) != "yes" {
 		if err := receiver.RejectConnection(); err != nil {
@@ -103,7 +101,7 @@ func runReceive(serverURL string) {
 		return
 	}
 
-	fmt.Println("🔗 Connection accepted! Establishing direct P2P link...")
+	fmt.Println("Connection accepted! Establishing direct P2P link...")
 	if err := receiver.ApproveConnection(); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Error accepting connection: %v\n", err)
 		os.Exit(1)
@@ -116,20 +114,15 @@ func runReceive(serverURL string) {
 	}
 
 	for tr := range receiver.TransferRequest() {
-		fmt.Printf("📦 Incoming file: %s (%s)\n", tr.FileName, formatSize(int64(tr.Size)))
-
 		if err := receiver.Accept(tr); err != nil {
 			fmt.Fprintf(os.Stderr, "❌ Error accepting file transfer: %v\n", err)
 			os.Exit(1)
 		}
 
-		fmt.Println("📥 Downloading...")
-
 		if err := <-receiver.Done(); err != nil {
 			fmt.Printf("❌ Error during transfer: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("\n🎉 %s received successfully! Saved as %s.yeeted\n", tr.FileName, tr.FileName)
 	}
 }
 

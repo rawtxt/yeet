@@ -28,6 +28,7 @@ type Receiver struct {
 	dc                  *webrtc.DataChannel
 	mu                  sync.Mutex
 	activeFile          *os.File
+	activeFileName      string
 	bytesRemaining      int64
 	totalBytes          int64
 	doneChan            chan error
@@ -203,8 +204,11 @@ func (r *Receiver) Accept(tr TransferRequest) error {
 		return fmt.Errorf("Accept: failed to create output file: %w", err)
 	}
 	r.activeFile = file
+	r.activeFileName = tr.FileName
 	r.bytesRemaining = int64(tr.Size)
 	r.totalBytes = int64(tr.Size)
+
+	fmt.Printf("📥 Downloading %s... 0.0%% (0 B / %s)\033[K", truncateString(tr.FileName, 40), formatSize(int64(tr.Size)))
 
 	// log.Printf("Accepting transfer of %q (%d bytes) as %q\n", tr.FileName, tr.Size, outName)
 	return r.dc.SendText(fmt.Sprintf("accept %q", tr.FileName))
@@ -376,6 +380,7 @@ func (r *Receiver) setupDataChannel() error {
 			r.bytesRemaining -= int64(n)
 			remaining := r.bytesRemaining
 			total := r.totalBytes
+			fileName := r.activeFileName
 			if remaining <= 0 {
 				r.activeFile.Close()
 				r.activeFile = nil
@@ -384,10 +389,10 @@ func (r *Receiver) setupDataChannel() error {
 
 			written := total - remaining
 			percent := float64(written) / float64(total) * 100
-			fmt.Printf("\r📥 Downloading... %.1f%% (%s / %s)", percent, formatSize(written), formatSize(total))
+			fmt.Printf("\r📥 Downloading %s... %.1f%% (%s / %s)\033[K", truncateString(fileName, 40), percent, formatSize(written), formatSize(total))
 
 			if remaining <= 0 {
-				fmt.Println()
+				fmt.Printf("\r✨ %s received successfully! Saved as %s.yeeted\033[K\n", fileName, fileName)
 				// log.Printf("Transfer complete! Received all bytes. Sending completion acknowledgment...\n")
 				if err := r.dc.SendText("done"); err != nil {
 					// log.Printf("Warning: failed to send completion acknowledgment: %v\n", err)

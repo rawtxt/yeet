@@ -214,6 +214,8 @@ func (s *Sender) Send(filename string) error {
 	baseName := filepath.Base(filename)
 	// log.Printf("Preparing to send %q (%d bytes)\n", baseName, stat.Size())
 
+	fmt.Printf("📤 Yeeting %s... 0.0%% (0 B / %s)\033[K", truncateString(baseName, 40), formatSize(stat.Size()))
+
 	acceptanceWaiter := make(chan struct{})
 	s.dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 		if msg.IsString && string(msg.Data) == fmt.Sprintf("accept %q", baseName) {
@@ -256,7 +258,7 @@ func (s *Sender) Send(filename string) error {
 			}
 			totalSent += int64(n)
 			percent := float64(totalSent) / float64(stat.Size()) * 100
-			fmt.Printf("\r📤 Yeeting... %.1f%% (%s / %s)", percent, formatSize(totalSent), formatSize(stat.Size()))
+			fmt.Printf("\r📤 Yeeting %s... %.1f%% (%s / %s)\033[K", truncateString(baseName, 40), percent, formatSize(totalSent), formatSize(stat.Size()))
 			// log.Printf("Progress: %d / %d bytes sent (%.2f%%)\n", totalSent, stat.Size(), float64(totalSent)/float64(stat.Size())*100)
 		}
 		if err != nil {
@@ -266,7 +268,6 @@ func (s *Sender) Send(filename string) error {
 			return fmt.Errorf("Send: failed reading file: %w", err)
 		}
 	}
-	fmt.Println()
 
 	// log.Println("File sent completely! Waiting for receiver confirmation...")
 
@@ -280,10 +281,20 @@ func (s *Sender) Send(filename string) error {
 
 	select {
 	case <-doneWaiter:
-		// log.Println("Receiver confirmed successful receipt of all bytes. Transfer complete!")
+		fmt.Printf("\r✨ %s (%s) yeeted successfully!\033[K\n", baseName, formatSize(stat.Size()))
 	case <-time.After(15 * time.Second):
 		return fmt.Errorf("Send: timed out waiting for receiver completion acknowledgment")
 	}
 
 	return nil
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
 }
