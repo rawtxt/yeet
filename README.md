@@ -1,19 +1,7 @@
 # `yeet` your file across the interweb
 
-Fast, zero-setup, peer-to-peer (P2P) file transfer tool powered by WebRTC.
-
-> [!WARNING]  
-> ⚠️ **Under Construction:** This is not yet stable.
-
----
-
-## About
-
-`yeet` is a fast, zero-setup, peer-to-peer (P2P) file transfer tool powered by modern WebRTC. NAT hole-punching and secure handshakes are handled automatically under the hood.
-
+`yeet` is a fast, zero-setup, peer-to-peer (P2P) file transfer tool powered by modern WebRTC.
 `yeet` also works without an internet connection. If you are on the same Wi-Fi, `yeet` automatically switches to local offline mode to find your peer and transfer files with zero setup.
-
----
 
 ## Installation
 
@@ -31,11 +19,9 @@ cd yeet
 go install
 ```
 
----
-
 ## Basic Usage
 
-### 1. Receive
+### Receive
 Run `yeet` without arguments to wait for a payload. It registers your session and gives you a 6-digit code:
 
 ```bash
@@ -48,11 +34,11 @@ yeet
 ⏳ Waiting for a sender to connect...
 ```
 
-### 2. Send
+### Send
 Yeet your file directly to your friend by specifying its name and typing in their 6-digit code:
 
 ```bash
-yeet my_cat_photo.jpg
+yeet cat.jpg book.pdf
 ```
 
 *Output:*
@@ -61,7 +47,7 @@ Enter 6-digit Session ID: 123456
 🔗 Connected to signalling server! Handshaking with receiver...
 ```
 
-### 3. Custom Signalling Node
+### Custom Signalling Node
 You can run your own signalling node:
 
 ```bash
@@ -73,9 +59,3 @@ To point your clients to a custom signalling node:
 ```bash
 yeet -server http://localhost:8080 [file]
 ```
-
----
-
-## Future Ideas
-- **Multi-file transfer:** Fling batches of files or whole directories at once.
-- **Resume transfer:** Seamlessly pick up right where you left off if a connection gets interrupted mid-flight.
