@@ -101,7 +101,7 @@ func NewReceiver(serverURL string) (*Receiver, error) {
 	r.LocalServerURL = "http://127.0.0.1:" + portStr
 
 	if err := r.registerSession(); err != nil {
-		r.SessionID = SessionID(generateSessionID())
+		r.SessionID = generateSessionID()
 		r.SecretToken = generateSecretToken()
 		r.serverURL = "http://127.0.0.1:" + portStr
 	}
@@ -110,7 +110,7 @@ func NewReceiver(serverURL string) (*Receiver, error) {
 	if err != nil {
 		return nil, fmt.Errorf("NewReceiver: failed to encode local token: %w", err)
 	}
-	localServer.AddSession(string(r.SessionID), r.SecretToken, tok)
+	localServer.AddSession(r.SessionID, r.SecretToken, tok)
 
 	go r.listenToEvents()
 

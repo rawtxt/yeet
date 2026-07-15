@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	mrand "math/rand/v2"
 	"net"
 	"net/http"
 	"strings"
@@ -15,25 +14,16 @@ import (
 	"unicode"
 )
 
-type Session struct {
-	ID            string
-	SecretToken   string
-	ReceiverToken string
-	EventChan     chan string
-	ApprovedChan  chan bool
-	ExpiresAt     time.Time
-}
-
 type SignallingServer struct {
 	mu          sync.Mutex
-	sessions    map[string]*Session
+	sessions    map[SessionID]*Session
 	Silent      bool
 	MaxSessions int
 }
 
 func NewSignallingServer() *SignallingServer {
 	return &SignallingServer{
-		sessions:    make(map[string]*Session),
+		sessions:    make(map[SessionID]*Session),
 		MaxSessions: 10000,
 	}
 }
@@ -44,13 +34,13 @@ func (s *SignallingServer) logf(format string, v ...any) {
 	}
 }
 
-func (s *SignallingServer) AddSession(sessionID, secretToken, receiverToken string) {
+func (s *SignallingServer) AddSession(sessionID SessionID, secretToken, receiverToken string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.addSessionLocked(sessionID, secretToken, receiverToken)
 }
 
-func (s *SignallingServer) addSessionLocked(sessionID, secretToken, receiverToken string) {
+func (s *SignallingServer) addSessionLocked(sessionID SessionID, secretToken, receiverToken string) {
 	session := &Session{
 		ID:            sessionID,
 		SecretToken:   secretToken,
@@ -137,7 +127,7 @@ func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var sessionID string
+	var sessionID SessionID
 	for {
 		sessionID = generateSessionID()
 		if _, exists := s.sessions[sessionID]; !exists {
@@ -153,7 +143,7 @@ func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
-		"session_id":   sessionID,
+		"session_id":   string(sessionID),
 		"secret_token": secretToken,
 	})
 }
@@ -167,7 +157,7 @@ func (s *SignallingServer) handleEvents(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.mu.Lock()
-	session, exists := s.sessions[sessionID]
+	session, exists := s.sessions[SessionID(sessionID)]
 	s.mu.Unlock()
 
 	if !exists {
@@ -209,7 +199,7 @@ func (s *SignallingServer) handleEvents(w http.ResponseWriter, r *http.Request) 
 		case <-r.Context().Done():
 			s.logf("[Server] Session %s closed SSE stream\n", sessionID)
 			s.mu.Lock()
-			delete(s.sessions, sessionID)
+			delete(s.sessions, SessionID(sessionID))
 			s.mu.Unlock()
 			return
 		}
@@ -243,7 +233,7 @@ func (s *SignallingServer) handleConnect(w http.ResponseWriter, r *http.Request)
 	}
 
 	s.mu.Lock()
-	session, exists := s.sessions[sessionID]
+	session, exists := s.sessions[SessionID(sessionID)]
 	s.mu.Unlock()
 
 	if !exists {
@@ -294,7 +284,7 @@ func (s *SignallingServer) handleApprove(w http.ResponseWriter, r *http.Request)
 	}
 
 	s.mu.Lock()
-	session, exists := s.sessions[sessionID]
+	session, exists := s.sessions[SessionID(sessionID)]
 	s.mu.Unlock()
 
 	if !exists {
@@ -341,7 +331,7 @@ func (s *SignallingServer) handleAnswer(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.mu.Lock()
-	session, exists := s.sessions[sessionID]
+	session, exists := s.sessions[SessionID(sessionID)]
 	s.mu.Unlock()
 
 	if !exists {
@@ -366,10 +356,6 @@ func generateSecretToken() string {
 		panic(err) // crypto/rand shouldn't fail
 	}
 	return hex.EncodeToString(b)
-}
-
-func generateSessionID() string {
-	return fmt.Sprintf("%06d", mrand.IntN(1000000))
 }
 
 func sanitizeSenderName(name string) string {

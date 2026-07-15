@@ -22,7 +22,7 @@ go install
 ## Basic Usage
 
 ### Receive
-Run `yeet` without arguments to wait for a payload. It registers your session and gives you a 6-digit code:
+Run `yeet` without arguments to wait for a payload. It registers your session and gives you a 3-word phrase code:
 
 ```bash
 yeet
@@ -30,12 +30,12 @@ yeet
 
 *Output:*
 ```text
-🚀 Your 6-digit Session ID: 123456
+🚀 Your Session ID: alert-aware-bacon
 ⏳ Waiting for a sender to connect...
 ```
 
 ### Send
-Yeet your file directly to your friend by specifying its name and typing in their 6-digit code:
+Yeet your file directly to your friend by specifying its name and typing in their 3-word phrase code:
 
 ```bash
 yeet cat.jpg book.pdf
@@ -43,7 +43,7 @@ yeet cat.jpg book.pdf
 
 *Output:*
 ```text
-Enter 6-digit Session ID: 123456
+Enter Session ID: alert-aware-bacon
 🔗 Connected to signalling server! Handshaking with receiver...
 ```
 

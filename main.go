@@ -53,7 +53,7 @@ func runSignalling(addr string) {
 }
 
 func runSend(serverURL string, filenames []string) {
-	fmt.Printf("Enter 6-digit Session ID: ")
+	fmt.Printf("Enter Session ID: ")
 	sessionID := readLine()
 
 	sender, err := NewSender(serverURL, SessionID(sessionID))
@@ -87,7 +87,7 @@ func runReceive(serverURL string) {
 	}
 	defer receiver.Close()
 
-	fmt.Printf("Your 6-digit Session ID: %s\n", receiver.SessionID)
+	fmt.Printf("Your Session ID: %s\n", receiver.SessionID)
 	fmt.Println("Waiting for a sender to connect...")
 
 	senderName := <-receiver.SenderRequest()

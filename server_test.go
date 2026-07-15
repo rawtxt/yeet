@@ -31,8 +31,9 @@ func TestSignallingRegister(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if len(resp.SessionID) != 6 {
-		t.Errorf("expected 6-digit session ID, got %q", resp.SessionID)
+	parts := strings.Split(resp.SessionID, "-")
+	if len(parts) != 3 {
+		t.Errorf("expected 3-word session ID, got %q", resp.SessionID)
 	}
 	if len(resp.SecretToken) != 32 {
 		t.Errorf("expected 32-character secret token, got %q", resp.SecretToken)
@@ -113,7 +114,7 @@ func TestSignallingConnectAndApprove(t *testing.T) {
 	}()
 
 	// Read event channel to make sure "sender_request alice" event is received
-	session := server.sessions[registered.SessionID]
+	session := server.sessions[SessionID(registered.SessionID)]
 	select {
 	case event := <-session.EventChan:
 		if event != "sender_request alice" {
@@ -170,7 +171,7 @@ func TestSessionExpiration(t *testing.T) {
 
 	// Verify session is active
 	server.mu.Lock()
-	session, exists := server.sessions[registered.SessionID]
+	session, exists := server.sessions[SessionID(registered.SessionID)]
 	server.mu.Unlock()
 	if !exists {
 		t.Fatal("session was not registered")
@@ -189,7 +190,7 @@ func TestSessionExpiration(t *testing.T) {
 
 	// Verify session is gone from the database
 	server.mu.Lock()
-	_, exists = server.sessions[registered.SessionID]
+	_, exists = server.sessions[SessionID(registered.SessionID)]
 	server.mu.Unlock()
 	if exists {
 		t.Error("expected session to be deleted after reap")
