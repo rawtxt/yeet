@@ -48,7 +48,10 @@ func NewReceiver(serverURL string) (*Receiver, error) {
 		useSTUN = false
 	}
 
-	pc, err := webrtc.NewPeerConnection(WebRTCConfig(useSTUN))
+	se := webrtc.SettingEngine{}
+	se.SetSCTPMaxReceiveBufferSize(16 * 1024 * 1024) // 16 MB
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(se))
+	pc, err := api.NewPeerConnection(WebRTCConfig(useSTUN))
 	if err != nil {
 		return nil, fmt.Errorf("NewReceiver: %w", err)
 	}

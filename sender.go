@@ -114,7 +114,10 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 		return nil, fmt.Errorf("NewSender: failed to parse response: %w", err)
 	}
 
-	pc, err := webrtc.NewPeerConnection(WebRTCConfig(useSTUN))
+	se := webrtc.SettingEngine{}
+	se.SetSCTPMaxReceiveBufferSize(16 * 1024 * 1024) // 16 MB
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(se))
+	pc, err := api.NewPeerConnection(WebRTCConfig(useSTUN))
 	if err != nil {
 		return nil, fmt.Errorf("NewSender: %w", err)
 	}
@@ -242,7 +245,16 @@ func (s *Sender) Send(filename string) error {
 	<-acceptanceWaiter
 	// log.Printf("Got approval from receiver to send %q\n", baseName)
 
-	buffer := make([]byte, 16*1024)
+	bufferedAmountLowChan := make(chan struct{}, 1)
+	s.dc.SetBufferedAmountLowThreshold(512 * 1024) // 512 KB
+	s.dc.OnBufferedAmountLow(func() {
+		select {
+		case bufferedAmountLowChan <- struct{}{}:
+		default:
+		}
+	})
+
+	buffer := make([]byte, 64*1024)
 	totalSent := int64(0)
 	for {
 		n, err := file.Read(buffer)
@@ -250,7 +262,10 @@ func (s *Sender) Send(filename string) error {
 			// WebRTC flow control: ensure we don't overwhelm the sending buffer.
 			// If BufferedAmount is too high (e.g. > 1MB), wait for it to clear.
 			for s.dc.BufferedAmount() > 1024*1024 {
-				time.Sleep(10 * time.Millisecond)
+				select {
+				case <-bufferedAmountLowChan:
+				case <-time.After(50 * time.Millisecond):
+				}
 			}
 
 			if err := s.dc.Send(buffer[:n]); err != nil {
