@@ -129,6 +129,7 @@ func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request
 
 	ip := s.extractIP(r)
 	if !s.checkRateLimit(ip) {
+		s.logf("[Server] Warning: Rate limit hit for IP %s (too many registration requests)\n", ip)
 		http.Error(w, "Too many registration requests. Please wait and try again later.", http.StatusTooManyRequests)
 		return
 	}
@@ -162,7 +163,7 @@ func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request
 	s.addSessionLocked(sessionID, secretToken, req.ReceiverToken)
 	s.mu.Unlock()
 
-	s.logf("[Server] Registered session %s (secure token generated)\n", sessionID)
+	s.logf("[Server] Registered session %s for IP %s (secure token generated)\n", sessionID, ip)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
@@ -184,12 +185,14 @@ func (s *SignallingServer) handleEvents(w http.ResponseWriter, r *http.Request) 
 	s.mu.Unlock()
 
 	if !exists {
+		s.logf("[Server] Warning: SSE /events requested for non-existent session %s\n", sessionID)
 		http.Error(w, "Session not found", http.StatusNotFound)
 		return
 	}
 
 	// Validate secret token
 	if session.SecretToken != token {
+		s.logf("[Server] Warning: Unauthorized SSE /events attempt for session %s (token mismatch)\n", sessionID)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -260,6 +263,7 @@ func (s *SignallingServer) handleConnect(w http.ResponseWriter, r *http.Request)
 	s.mu.Unlock()
 
 	if !exists {
+		s.logf("[Server] Warning: /connect requested for non-existent session %s\n", sessionID)
 		http.Error(w, "Session not found", http.StatusNotFound)
 		return
 	}
@@ -311,12 +315,14 @@ func (s *SignallingServer) handleApprove(w http.ResponseWriter, r *http.Request)
 	s.mu.Unlock()
 
 	if !exists {
+		s.logf("[Server] Warning: /approve requested for non-existent session %s\n", sessionID)
 		http.Error(w, "Session not found", http.StatusNotFound)
 		return
 	}
 
 	// Validate secret token
 	if session.SecretToken != token {
+		s.logf("[Server] Warning: Unauthorized /approve attempt for session %s (token mismatch)\n", sessionID)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -358,6 +364,7 @@ func (s *SignallingServer) handleAnswer(w http.ResponseWriter, r *http.Request) 
 	s.mu.Unlock()
 
 	if !exists {
+		s.logf("[Server] Warning: /answer requested for non-existent session %s\n", sessionID)
 		http.Error(w, "Session not found", http.StatusNotFound)
 		return
 	}
