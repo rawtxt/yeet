@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ type Receiver struct {
 	mu                  sync.Mutex
 	activeFile          *os.File
 	activeFileName      string
+	activeFileSavedName string
 	bytesRemaining      int64
 	totalBytes          int64
 	doneChan            chan error
@@ -201,13 +203,14 @@ func (r *Receiver) Accept(tr TransferRequest) error {
 		return fmt.Errorf("Accept: a transfer is already in progress")
 	}
 
-	outName := tr.FileName + ".yeeted"
+	outName := uniqueFilename(tr.FileName)
 	file, err := os.Create(outName)
 	if err != nil {
 		return fmt.Errorf("Accept: failed to create output file: %w", err)
 	}
 	r.activeFile = file
 	r.activeFileName = tr.FileName
+	r.activeFileSavedName = outName
 	r.bytesRemaining = int64(tr.Size)
 	r.totalBytes = int64(tr.Size)
 
@@ -384,6 +387,7 @@ func (r *Receiver) setupDataChannel() error {
 			remaining := r.bytesRemaining
 			total := r.totalBytes
 			fileName := r.activeFileName
+			savedName := r.activeFileSavedName
 			if remaining <= 0 {
 				r.activeFile.Close()
 				r.activeFile = nil
@@ -395,7 +399,7 @@ func (r *Receiver) setupDataChannel() error {
 			fmt.Printf("\r📥 Downloading %s... %.1f%% (%s / %s)\033[K", truncateString(fileName, 40), percent, formatSize(written), formatSize(total))
 
 			if remaining <= 0 {
-				fmt.Printf("\r✨ %s received successfully! Saved as %s.yeeted\033[K\n", fileName, fileName)
+				fmt.Printf("\r✨ %s received successfully! Saved as %s\033[K\n", fileName, savedName)
 				// log.Printf("Transfer complete! Received all bytes. Sending completion acknowledgment...\n")
 				if err := r.dc.SendText("done"); err != nil {
 					// log.Printf("Warning: failed to send completion acknowledgment: %v\n", err)
@@ -415,4 +419,22 @@ func (r *Receiver) setupDataChannel() error {
 	})
 
 	return nil
+}
+
+func uniqueFilename(filename string) string {
+	if _, err := os.Stat(filename); os.IsNotExist(err) {
+		return filename
+	}
+
+	ext := filepath.Ext(filename)
+	stem := strings.TrimSuffix(filename, ext)
+
+	i := 1
+	for {
+		newName := fmt.Sprintf("%s (%d)%s", stem, i, ext)
+		if _, err := os.Stat(newName); os.IsNotExist(err) {
+			return newName
+		}
+		i++
+	}
 }

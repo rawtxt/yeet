@@ -121,7 +121,7 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
 		t.Fatalf("receiver timed out")
 	}
 
-	destPath := "source.bin.yeeted"
+	destPath := "source.bin"
 	defer os.Remove(destPath)
 
 	destContent, err := os.ReadFile(destPath)
@@ -242,7 +242,7 @@ func TestP2PFileTransferLocal(t *testing.T) {
 		t.Fatalf("receiver timed out")
 	}
 
-	destPath := "source.bin.yeeted"
+	destPath := "source.bin"
 	defer os.Remove(destPath)
 
 	destContent, err := os.ReadFile(destPath)
@@ -367,7 +367,7 @@ func TestP2PFileTransferE2E(t *testing.T) {
 		t.Fatalf("receiver timed out")
 	}
 
-	destPath := "source.bin.yeeted"
+	destPath := "source.bin"
 	defer os.Remove(destPath)
 
 	destContent, err := os.ReadFile(destPath)
@@ -515,7 +515,7 @@ func TestP2PMultiFileTransferLocal(t *testing.T) {
 	}
 
 	for _, f := range files {
-		destPath := f.name + ".yeeted"
+		destPath := f.name
 		defer os.Remove(destPath)
 
 		destContent, err := os.ReadFile(destPath)
@@ -534,4 +534,40 @@ func TestP2PMultiFileTransferLocal(t *testing.T) {
 		}
 	}
 	log.Println("Go Integration Test: Success! Multi-file local transfer completed.")
+}
+
+func TestUniqueFilename(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "yeet-resolve-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	basePath := filepath.Join(tmpDir, "testfile.txt")
+
+	// 1. Path doesn't exist yet: should return original name
+	got1 := uniqueFilename(basePath)
+	if got1 != basePath {
+		t.Errorf("expected original path %q, got %q", basePath, got1)
+	}
+
+	// 2. Create the file: should return "testfile (1).txt"
+	if err := os.WriteFile(basePath, []byte("data"), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+	expected1 := filepath.Join(tmpDir, "testfile (1).txt")
+	got2 := uniqueFilename(basePath)
+	if got2 != expected1 {
+		t.Errorf("expected %q, got %q", expected1, got2)
+	}
+
+	// 3. Create the "testfile (1).txt" file: should return "testfile (2).txt"
+	if err := os.WriteFile(expected1, []byte("data"), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+	expected2 := filepath.Join(tmpDir, "testfile (2).txt")
+	got3 := uniqueFilename(basePath)
+	if got3 != expected2 {
+		t.Errorf("expected %q, got %q", expected2, got3)
+	}
 }
