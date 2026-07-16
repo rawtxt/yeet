@@ -14,17 +14,26 @@ import (
 	"unicode"
 )
 
+type rateLimiter struct {
+	tokens     float64
+	lastRefill time.Time
+	lastActive time.Time
+}
+
 type SignallingServer struct {
-	mu          sync.Mutex
-	sessions    map[SessionID]*Session
-	Silent      bool
-	MaxSessions int
+	mu           sync.Mutex
+	sessions     map[SessionID]*Session
+	rateLimiters map[string]*rateLimiter
+	Silent       bool
+	MaxSessions  int
+	BehindProxy  bool
 }
 
 func NewSignallingServer() *SignallingServer {
 	return &SignallingServer{
-		sessions:    make(map[SessionID]*Session),
-		MaxSessions: 10000,
+		sessions:     make(map[SessionID]*Session),
+		rateLimiters: make(map[string]*rateLimiter),
+		MaxSessions:  10000,
 	}
 }
 
@@ -91,6 +100,14 @@ func (s *SignallingServer) Reap() int {
 			reapedCount++
 		}
 	}
+
+	// Clean up inactive rate limiters (inactive for more than 10 minutes)
+	for ip, rl := range s.rateLimiters {
+		if now.Sub(rl.lastActive) > 10*time.Minute {
+			delete(s.rateLimiters, ip)
+		}
+	}
+
 	return reapedCount
 }
 
@@ -107,6 +124,12 @@ func (s *SignallingServer) reapExpiredSessions() {
 func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ip := s.extractIP(r)
+	if !s.checkRateLimit(ip) {
+		http.Error(w, "Too many registration requests. Please wait and try again later.", http.StatusTooManyRequests)
 		return
 	}
 
@@ -348,6 +371,62 @@ func (s *SignallingServer) handleAnswer(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *SignallingServer) extractIP(r *http.Request) string {
+	if s.BehindProxy {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			if len(parts) > 0 {
+				ip := strings.TrimSpace(parts[0])
+				if parsedIP := net.ParseIP(ip); parsedIP != nil {
+					return ip
+				}
+			}
+		}
+		if xri := r.Header.Get("X-Real-IP"); xri != "" {
+			if parsedIP := net.ParseIP(strings.TrimSpace(xri)); parsedIP != nil {
+				return strings.TrimSpace(xri)
+			}
+		}
+	}
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return strings.TrimSpace(r.RemoteAddr)
+	}
+	return strings.TrimSpace(host)
+}
+
+func (s *SignallingServer) checkRateLimit(ip string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	rl, exists := s.rateLimiters[ip]
+	if !exists {
+		rl = &rateLimiter{
+			tokens:     10.0,
+			lastRefill: now,
+			lastActive: now,
+		}
+		s.rateLimiters[ip] = rl
+	}
+
+	elapsed := now.Sub(rl.lastRefill).Seconds()
+	rl.lastRefill = now
+	rl.lastActive = now
+
+	rl.tokens += elapsed / 6.0
+	if rl.tokens > 10.0 {
+		rl.tokens = 10.0
+	}
+
+	if rl.tokens >= 1.0 {
+		rl.tokens -= 1.0
+		return true
+	}
+	return false
 }
 
 func generateSecretToken() string {

@@ -13,6 +13,7 @@ func main() {
 	signalling := flag.Bool("signalling", false, "Start custom signalling server")
 	addr := flag.String("addr", ":8080", "Address for signalling server to listen on")
 	server := flag.String("server", YeetSignallingServer, "Custom signalling server URL")
+	behindProxy := flag.Bool("behind-proxy", false, "Trust proxy headers for rate limiting (X-Forwarded-For, X-Real-IP)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n\n", filepath.Base(os.Args[0]))
@@ -21,7 +22,7 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "To send files:\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-server <url>] <filename1> [<filename2> ...]\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(flag.CommandLine.Output(), "To start a custom signalling node:\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "  %s -signalling [-addr <addr>]\n\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(flag.CommandLine.Output(), "  %s -signalling [-addr <addr>] [-behind-proxy]\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(flag.CommandLine.Output(), "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -29,7 +30,7 @@ func main() {
 	flag.Parse()
 
 	if *signalling {
-		runSignalling(*addr)
+		runSignalling(*addr, *behindProxy)
 		return
 	}
 
@@ -42,8 +43,9 @@ func main() {
 	runSend(*server, args)
 }
 
-func runSignalling(addr string) {
+func runSignalling(addr string, behindProxy bool) {
 	server := NewSignallingServer()
+	server.BehindProxy = behindProxy
 	_, err := server.Start(addr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Error starting signalling server: %v\n", err)

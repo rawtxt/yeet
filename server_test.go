@@ -253,3 +253,72 @@ func TestSanitizeSenderName(t *testing.T) {
 		}
 	}
 }
+
+func TestSignallingRegistrationRateLimiter(t *testing.T) {
+	server := NewSignallingServer()
+
+	// 1. Fill the rate limiter bucket up to capacity (10 tokens)
+	for i := range 10 {
+		reqBody := []byte(`{"receiver_token":"token"}`)
+		req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(reqBody))
+		req.RemoteAddr = "192.168.1.1:12345"
+		rr := httptest.NewRecorder()
+		server.handleRegister(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK on request %d from 192.168.1.1, got %d", i, rr.Code)
+		}
+	}
+
+	// 11th request from the same IP should fail with 429 Too Many Requests
+	reqBody := []byte(`{"receiver_token":"token"}`)
+	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(reqBody))
+	req.RemoteAddr = "192.168.1.1:12345"
+	rr := httptest.NewRecorder()
+	server.handleRegister(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 Too Many Requests, got %d", rr.Code)
+	}
+
+	// A request from a different IP should succeed immediately
+	req2 := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(reqBody))
+	req2.RemoteAddr = "192.168.1.2:12345"
+	rr2 := httptest.NewRecorder()
+	server.handleRegister(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from 192.168.1.2, got %d", rr2.Code)
+	}
+
+	// 2. BehindProxy: True should correctly extract IP from X-Forwarded-For
+	server.BehindProxy = true
+	// Fill the proxy rate limiter for "10.0.0.1"
+	for i := range 10 {
+		req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(reqBody))
+		req.Header.Set("X-Forwarded-For", "10.0.0.1, 10.0.0.2")
+		req.RemoteAddr = "192.168.1.99:12345" // Proxy IP
+		rr := httptest.NewRecorder()
+		server.handleRegister(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK on proxy request %d from 10.0.0.1, got %d", i, rr.Code)
+		}
+	}
+
+	// 11th proxy request for 10.0.0.1 should fail with 429
+	reqProxyFail := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(reqBody))
+	reqProxyFail.Header.Set("X-Forwarded-For", "10.0.0.1, 10.0.0.2")
+	reqProxyFail.RemoteAddr = "192.168.1.99:12345"
+	rrProxyFail := httptest.NewRecorder()
+	server.handleRegister(rrProxyFail, reqProxyFail)
+	if rrProxyFail.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 Too Many Requests via proxy, got %d", rrProxyFail.Code)
+	}
+
+	// But a request from 10.0.0.3 through same proxy should succeed
+	reqProxySuccess := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(reqBody))
+	reqProxySuccess.Header.Set("X-Forwarded-For", "10.0.0.3, 10.0.0.2")
+	reqProxySuccess.RemoteAddr = "192.168.1.99:12345"
+	rrProxySuccess := httptest.NewRecorder()
+	server.handleRegister(rrProxySuccess, reqProxySuccess)
+	if rrProxySuccess.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from 10.0.0.3 via proxy, got %d", rrProxySuccess.Code)
+	}
+}
