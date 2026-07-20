@@ -71,6 +71,7 @@ func (s *SignallingServer) Start(addr string) (string, error) {
 	mux.HandleFunc("/connect", s.handleConnect)
 	mux.HandleFunc("/approve", s.handleApprove)
 	mux.HandleFunc("/answer", s.handleAnswer)
+	mux.HandleFunc("/health", s.handleHealth)
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -119,6 +120,11 @@ func (s *SignallingServer) reapExpiredSessions() {
 			s.logf("[Server] Cleaned up %d expired sessions\n", reapedCount)
 		}
 	}
+}
+
+func (s *SignallingServer) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
 }
 
 func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request) {

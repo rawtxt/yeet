@@ -1,7 +1,7 @@
 # `yeet` your file across the interweb
 
 `yeet` is a fast, zero-setup, peer-to-peer (P2P) file transfer tool powered by modern WebRTC.
-`yeet` also works without an internet connection. If you are on the same Wi-Fi, `yeet` automatically switches to local offline mode to find your peer and transfer files with zero setup.
+`yeet` also works without an internet connection if both the receiver and sender are on the same local area network.
 
 ## Installation
 
