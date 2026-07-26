@@ -1,17 +1,9 @@
 package main
 
 import (
-	"bytes"
-	"compress/gzip"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"io"
 	mrand "math/rand/v2"
-	"strings"
 	"time"
-
-	"github.com/pion/webrtc/v4"
 )
 
 type SessionID string
@@ -66,48 +58,4 @@ func generateSessionID() SessionID {
 	word2 := sessionWords[mrand.IntN(n)]
 	word3 := sessionWords[mrand.IntN(n)]
 	return SessionID(fmt.Sprintf("%s-%s-%s", word1, word2, word3))
-}
-
-func encodeSDP(desc webrtc.SessionDescription) (string, error) {
-	b, err := json.Marshal(desc)
-	if err != nil {
-		return "", err
-	}
-
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	if _, err := gz.Write(b); err != nil {
-		return "", err
-	}
-	if err := gz.Close(); err != nil {
-		return "", err
-	}
-
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
-}
-
-func decodeSDP(str string) (webrtc.SessionDescription, error) {
-	var desc webrtc.SessionDescription
-	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(str))
-	if err != nil {
-		return desc, err
-	}
-
-	gz, err := gzip.NewReader(bytes.NewReader(data))
-	if err != nil {
-		return desc, err
-	}
-	defer gz.Close()
-
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, gz); err != nil {
-		return desc, err
-	}
-
-	err = json.Unmarshal(buf.Bytes(), &desc)
-	if err != nil {
-		return desc, err
-	}
-
-	return desc, nil
 }
