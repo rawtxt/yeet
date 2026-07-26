@@ -83,17 +83,7 @@ func runSend(serverURL, receiverIP string, filenames []string) {
 	}
 	defer sender.Close()
 
-	sender.OnProgress = func(fileName string, current, total int64) {
-		if total <= 0 {
-			return
-		}
-		if current >= total {
-			fmt.Printf("\r✨ %s (%s) yeeted successfully!\033[K\n", fileName, formatSize(total))
-			return
-		}
-		percent := float64(current) / float64(total) * 100
-		fmt.Printf("\r📤 Yeeting %s... %.1f%% (%s / %s)\033[K", truncateString(fileName, 40), percent, formatSize(current), formatSize(total))
-	}
+	sender.OnProgress = newCLIProgressHandler("📤 Yeeting", "yeeted successfully!")
 
 	if receiverIP != "" {
 		fmt.Printf("🔗 Connected directly to receiver at %s! Handshaking...\n", serverURL)
@@ -117,17 +107,7 @@ func runReceive(serverURL string) {
 	}
 	defer receiver.Close()
 
-	receiver.OnProgress = func(fileName string, current, total int64) {
-		if total <= 0 {
-			return
-		}
-		if current >= total {
-			fmt.Printf("\r✨ %s received successfully!\033[K\n", fileName)
-			return
-		}
-		percent := float64(current) / float64(total) * 100
-		fmt.Printf("\r📥 Downloading %s... %.1f%% (%s / %s)\033[K", truncateString(fileName, 40), percent, formatSize(current), formatSize(total))
-	}
+	receiver.OnProgress = newCLIProgressHandler("📥 Downloading", "received successfully!")
 
 	fmt.Printf("Your Session ID: %s\n", receiver.SessionID)
 	if localIP, err := GetLocalIP(); err == nil && localIP != "127.0.0.1" {
@@ -197,4 +177,18 @@ func readLine() string {
 		os.Exit(1)
 	}
 	return strings.TrimSpace(line)
+}
+
+func newCLIProgressHandler(actionLabel, completeSuffix string) ProgressFunc {
+	return func(fileName string, current, total int64) {
+		if total <= 0 {
+			return
+		}
+		if current >= total {
+			fmt.Printf("\r✨ %s %s\033[K\n", fileName, completeSuffix)
+			return
+		}
+		percent := float64(current) / float64(total) * 100
+		fmt.Printf("\r%s %s... %.1f%% (%s / %s)\033[K", actionLabel, truncateString(fileName, 40), percent, formatSize(current), formatSize(total))
+	}
 }
