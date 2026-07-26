@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 func main() {
 	runMatchmakerFlag := flag.Bool("run-matchmaker", false, "Start self-hosted matchmaker server (signalling + STUN)")
 	matchmakerURL := flag.String("matchmaker", YeetMatchmakerServer, "Custom matchmaker server URL")
+	receiverIPFlag := flag.String("receiver-ip", "", "Connect directly to receiver IP address (bypasses external matchmaker)")
 	addr := flag.String("addr", ":8080", "Address for matchmaker HTTP server to listen on")
 	stunAddr := flag.String("stun-addr", ":3478", "Address for matchmaker STUN server to listen on (UDP)")
 	behindProxy := flag.Bool("behind-proxy", false, "Trust proxy headers for rate limiting (X-Forwarded-For, X-Real-IP)")
@@ -21,7 +23,7 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "To receive a file:\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-matchmaker <url>]\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(flag.CommandLine.Output(), "To send files:\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-matchmaker <url>] <filename1> [<filename2> ...]\n\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-matchmaker <url>] [-receiver-ip <ip_addr>] <filename1> [<filename2> ...]\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(flag.CommandLine.Output(), "To start a self-hosted match-making server (signalling + STUN):\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  %s -run-matchmaker [-addr <addr>] [-stun-addr <addr>] [-behind-proxy]\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(flag.CommandLine.Output(), "Flags:\n")
@@ -46,7 +48,7 @@ func main() {
 		return
 	}
 
-	runSend(serverURL, args)
+	runSend(serverURL, *receiverIPFlag, args)
 }
 
 func runMatchmaker(addr, stunAddr string, behindProxy bool) {
@@ -60,7 +62,11 @@ func runMatchmaker(addr, stunAddr string, behindProxy bool) {
 	select {}
 }
 
-func runSend(serverURL string, filenames []string) {
+func runSend(serverURL, receiverIP string, filenames []string) {
+	if receiverIP != "" {
+		serverURL = FormatReceiverURL(receiverIP)
+	}
+
 	fmt.Printf("Enter Session ID: ")
 	sessionID := readLine()
 
@@ -77,7 +83,11 @@ func runSend(serverURL string, filenames []string) {
 	}
 	defer sender.Close()
 
-	fmt.Println("🔗 Connected to signalling server! Handshaking with receiver...")
+	if receiverIP != "" {
+		fmt.Printf("🔗 Connected directly to receiver at %s! Handshaking...\n", serverURL)
+	} else {
+		fmt.Println("🔗 Connected to signalling server! Handshaking with receiver...")
+	}
 
 	for _, filename := range filenames {
 		if err := sender.Send(filename); err != nil {
@@ -96,6 +106,14 @@ func runReceive(serverURL string) {
 	defer receiver.Close()
 
 	fmt.Printf("Your Session ID: %s\n", receiver.SessionID)
+	if localIP, err := GetLocalIP(); err == nil && localIP != "127.0.0.1" {
+		_, portStr, _ := net.SplitHostPort(strings.TrimPrefix(receiver.LocalServerURL, "http://"))
+		if portStr != "" && portStr != DefaultReceiverPort {
+			fmt.Printf("Local IP: %s:%s\n", localIP, portStr)
+		} else {
+			fmt.Printf("Local IP: %s\n", localIP)
+		}
+	}
 	fmt.Println("Waiting for a sender to connect...")
 
 	senderName := <-receiver.SenderRequest()

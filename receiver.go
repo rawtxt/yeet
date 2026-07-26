@@ -41,6 +41,7 @@ type Receiver struct {
 	localServer    *SignallingServer
 	mdnsServer     *mdns.Server
 	LocalServerURL string
+	activeServerURL string
 }
 
 func NewReceiver(serverURL string) (*Receiver, error) {
@@ -102,9 +103,12 @@ func NewReceiver(serverURL string) (*Receiver, error) {
 
 	localServer := NewSignallingServer()
 	localServer.Silent = true
-	actualAddr, err := localServer.Start("0.0.0.0:0")
+	actualAddr, err := localServer.Start("0.0.0.0:" + DefaultReceiverPort)
 	if err != nil {
-		return nil, fmt.Errorf("NewReceiver: failed to start local signalling server: %w", err)
+		actualAddr, err = localServer.Start("0.0.0.0:0")
+		if err != nil {
+			return nil, fmt.Errorf("NewReceiver: failed to start local signalling server: %w", err)
+		}
 	}
 	r.localServer = localServer
 
@@ -126,7 +130,10 @@ func NewReceiver(serverURL string) (*Receiver, error) {
 	}
 	localServer.AddSession(r.SessionID, r.SecretToken, tok)
 
-	go r.listenToEvents()
+	go r.listenToEvents(r.serverURL)
+	if r.LocalServerURL != "" && r.LocalServerURL != r.serverURL {
+		go r.listenToEvents(r.LocalServerURL)
+	}
 
 	if port, err := strconv.Atoi(portStr); err == nil {
 		host, _ := os.Hostname()
@@ -265,12 +272,10 @@ func (r *Receiver) registerSession() error {
 	return nil
 }
 
-func (r *Receiver) listenToEvents() {
-	url := fmt.Sprintf("%s/events?session_id=%s&token=%s", r.serverURL, r.SessionID, r.SecretToken)
+func (r *Receiver) listenToEvents(serverURL string) {
+	url := fmt.Sprintf("%s/events?session_id=%s&token=%s", serverURL, r.SessionID, r.SecretToken)
 	resp, err := http.Get(url)
 	if err != nil {
-		// log.Printf("SSE: connection failed: %v\n", err)
-		r.doneChan <- fmt.Errorf("SSE connection failed: %w", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -286,21 +291,33 @@ func (r *Receiver) listenToEvents() {
 
 			if after, ok := strings.CutPrefix(data, "sender_request "); ok {
 				senderName := after
-				r.senderRequestChan <- senderName
+				r.mu.Lock()
+				r.activeServerURL = serverURL
+				r.mu.Unlock()
+				select {
+				case r.senderRequestChan <- senderName:
+				default:
+				}
 			} else if after, ok := strings.CutPrefix(data, "sender_answer "); ok {
 				senderToken := after
-				r.senderAnswerChan <- senderToken
+				select {
+				case r.senderAnswerChan <- senderToken:
+				default:
+				}
 			}
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		// log.Printf("SSE: stream read error: %v\n", err)
-		r.doneChan <- fmt.Errorf("SSE stream read error: %w", err)
 	}
 }
 
 func (r *Receiver) ApproveConnection() error {
-	url := fmt.Sprintf("%s/approve?session_id=%s&status=accept&token=%s", r.serverURL, r.SessionID, r.SecretToken)
+	r.mu.Lock()
+	targetURL := r.activeServerURL
+	if targetURL == "" {
+		targetURL = r.serverURL
+	}
+	r.mu.Unlock()
+
+	url := fmt.Sprintf("%s/approve?session_id=%s&status=accept&token=%s", targetURL, r.SessionID, r.SecretToken)
 	resp, err := http.Post(url, "", nil)
 	if err != nil {
 		return err
@@ -314,7 +331,14 @@ func (r *Receiver) ApproveConnection() error {
 }
 
 func (r *Receiver) RejectConnection() error {
-	url := fmt.Sprintf("%s/approve?session_id=%s&status=reject&token=%s", r.serverURL, r.SessionID, r.SecretToken)
+	r.mu.Lock()
+	targetURL := r.activeServerURL
+	if targetURL == "" {
+		targetURL = r.serverURL
+	}
+	r.mu.Unlock()
+
+	url := fmt.Sprintf("%s/approve?session_id=%s&status=reject&token=%s", targetURL, r.SessionID, r.SecretToken)
 	resp, err := http.Post(url, "", nil)
 	if err != nil {
 		return err

@@ -13,6 +13,19 @@ const DataChannelLabel = "yeet-channel"
 
 const YeetMatchmakerServer = "https://yeet-server.fly.dev"
 const YeetSignallingServer = YeetMatchmakerServer
+const DefaultReceiverPort = "8338"
+
+func FormatReceiverURL(receiverIP string) string {
+	receiverIP = strings.TrimSpace(receiverIP)
+	if strings.HasPrefix(receiverIP, "http://") || strings.HasPrefix(receiverIP, "https://") {
+		return receiverIP
+	}
+	host, port, err := net.SplitHostPort(receiverIP)
+	if err == nil && host != "" && port != "" {
+		return "http://" + receiverIP
+	}
+	return "http://" + net.JoinHostPort(receiverIP, DefaultReceiverPort)
+}
 
 func WebRTCConfig(useSTUN bool, stunURLs ...string) webrtc.Configuration {
 	if !useSTUN {

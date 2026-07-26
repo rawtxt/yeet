@@ -571,3 +571,136 @@ func TestUniqueFilename(t *testing.T) {
 		t.Errorf("expected %q, got %q", expected2, got3)
 	}
 }
+
+func TestFormatReceiverURL(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"192.168.1.50", "http://192.168.1.50:8338"},
+		{"192.168.1.50:9090", "http://192.168.1.50:9090"},
+		{"http://10.0.0.1:8080", "http://10.0.0.1:8080"},
+		{"https://receiver.domain.com", "https://receiver.domain.com"},
+	}
+
+	for _, tt := range tests {
+		got := FormatReceiverURL(tt.input)
+		if got != tt.expected {
+			t.Errorf("FormatReceiverURL(%q) = %q, expected %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestP2PFileTransferDirectIP(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "yeet-test-direct-ip-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	srcPath := filepath.Join(tmpDir, "source.bin")
+	content := []byte(`Direct IP connection without external matchmaker content test.`)
+	if err := os.WriteFile(srcPath, content, 0644); err != nil {
+		t.Fatalf("failed to write source file: %v", err)
+	}
+
+	receiver, err := NewReceiver("http://invalid.unreachable.domain:9999")
+	if err != nil {
+		t.Fatalf("failed to create receiver: %v", err)
+	}
+	defer receiver.Close()
+
+	recvDone := make(chan error, 1)
+	go func() {
+		var senderName string
+		select {
+		case senderName = <-receiver.SenderRequest():
+			log.Printf("Test Direct IP Receiver: Received request from '%s'\n", senderName)
+		case <-time.After(5 * time.Second):
+			recvDone <- fmt.Errorf("timeout waiting for sender request")
+			return
+		}
+
+		if err := receiver.ApproveConnection(); err != nil {
+			recvDone <- fmt.Errorf("failed to approve: %w", err)
+			return
+		}
+
+		var senderToken string
+		select {
+		case senderToken = <-receiver.SenderAnswer():
+		case <-time.After(5 * time.Second):
+			recvDone <- fmt.Errorf("timeout waiting for sender answer")
+			return
+		}
+
+		if err := receiver.Connect(senderToken); err != nil {
+			recvDone <- fmt.Errorf("failed to connect receiver: %w", err)
+			return
+		}
+
+		var tr TransferRequest
+		select {
+		case tr = <-receiver.TransferRequest():
+			log.Printf("Test Direct IP Receiver: Received transfer request for %s (%d bytes)\n", tr.FileName, tr.Size)
+		case <-time.After(5 * time.Second):
+			recvDone <- fmt.Errorf("timeout waiting for transfer request")
+			return
+		}
+
+		if err := receiver.Accept(tr); err != nil {
+			recvDone <- fmt.Errorf("failed to accept transfer: %w", err)
+			return
+		}
+
+		select {
+		case err := <-receiver.Done():
+			recvDone <- err
+		case <-time.After(10 * time.Second):
+			recvDone <- fmt.Errorf("timeout waiting for transfer completion")
+		}
+	}()
+
+	sendErrChan := make(chan error, 1)
+	go func() {
+		targetURL := FormatReceiverURL(receiver.LocalServerURL)
+		sender, err := NewSender(targetURL, receiver.SessionID)
+		if err != nil {
+			sendErrChan <- fmt.Errorf("failed to create sender: %w", err)
+			return
+		}
+		defer sender.Close()
+
+		sendErrChan <- sender.Send(srcPath)
+	}()
+
+	select {
+	case err := <-sendErrChan:
+		if err != nil {
+			t.Fatalf("sender failed: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatalf("sender timed out")
+	}
+
+	select {
+	case err := <-recvDone:
+		if err != nil {
+			t.Fatalf("receiver failed: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatalf("receiver timed out")
+	}
+
+	destPath := "source.bin"
+	defer os.Remove(destPath)
+
+	destContent, err := os.ReadFile(destPath)
+	if err != nil {
+		t.Fatalf("failed to read downloaded file: %v", err)
+	}
+
+	if string(destContent) != string(content) {
+		t.Errorf("content mismatch!\nExpected: %q\nGot:      %q", content, destContent)
+	}
+}
