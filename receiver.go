@@ -45,15 +45,24 @@ type Receiver struct {
 
 func NewReceiver(serverURL string) (*Receiver, error) {
 	useSTUN := true
-	client := http.Client{Timeout: 200 * time.Millisecond}
-	if _, err := client.Get(serverURL); err != nil {
+	stunURL := ""
+	client := http.Client{Timeout: 500 * time.Millisecond}
+	if resp, err := client.Get(serverURL + "/health"); err == nil {
+		defer resp.Body.Close()
+		var hres struct {
+			StunServer string `json:"stun_server"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&hres) == nil && hres.StunServer != "" {
+			stunURL = resolveStunURL(hres.StunServer, serverURL)
+		}
+	} else {
 		useSTUN = false
 	}
 
 	se := webrtc.SettingEngine{}
 	se.SetSCTPMaxReceiveBufferSize(16 * 1024 * 1024) // 16 MB
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(se))
-	pc, err := api.NewPeerConnection(WebRTCConfig(useSTUN))
+	pc, err := api.NewPeerConnection(WebRTCConfig(useSTUN, stunURL))
 	if err != nil {
 		return nil, fmt.Errorf("NewReceiver: %w", err)
 	}

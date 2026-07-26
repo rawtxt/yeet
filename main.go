@@ -10,45 +10,51 @@ import (
 )
 
 func main() {
-	signalling := flag.Bool("signalling", false, "Start custom signalling server")
-	addr := flag.String("addr", ":8080", "Address for signalling server to listen on")
-	server := flag.String("server", YeetSignallingServer, "Custom signalling server URL")
+	runMatchmakerFlag := flag.Bool("run-matchmaker", false, "Start self-hosted matchmaker server (signalling + STUN)")
+	matchmakerURL := flag.String("matchmaker", YeetMatchmakerServer, "Custom matchmaker server URL")
+	addr := flag.String("addr", ":8080", "Address for matchmaker HTTP server to listen on")
+	stunAddr := flag.String("stun-addr", ":3478", "Address for matchmaker STUN server to listen on (UDP)")
 	behindProxy := flag.Bool("behind-proxy", false, "Trust proxy headers for rate limiting (X-Forwarded-For, X-Real-IP)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(flag.CommandLine.Output(), "To receive a file:\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-server <url>]\n\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-matchmaker <url>]\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(flag.CommandLine.Output(), "To send files:\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-server <url>] <filename1> [<filename2> ...]\n\n", filepath.Base(os.Args[0]))
-		fmt.Fprintf(flag.CommandLine.Output(), "To start a custom signalling node:\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "  %s -signalling [-addr <addr>] [-behind-proxy]\n\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-matchmaker <url>] <filename1> [<filename2> ...]\n\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(flag.CommandLine.Output(), "To start a self-hosted match-making server (signalling + STUN):\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  %s -run-matchmaker [-addr <addr>] [-stun-addr <addr>] [-behind-proxy]\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(flag.CommandLine.Output(), "Flags:\n")
 		flag.PrintDefaults()
 	}
 
 	flag.Parse()
 
-	if *signalling {
-		runSignalling(*addr, *behindProxy)
+	if *runMatchmakerFlag {
+		runMatchmaker(*addr, *stunAddr, *behindProxy)
 		return
+	}
+
+	serverURL := *matchmakerURL
+	if serverURL == "" {
+		serverURL = YeetMatchmakerServer
 	}
 
 	args := flag.Args()
 	if len(args) == 0 {
-		runReceive(*server)
+		runReceive(serverURL)
 		return
 	}
 
-	runSend(*server, args)
+	runSend(serverURL, args)
 }
 
-func runSignalling(addr string, behindProxy bool) {
-	server := NewSignallingServer()
-	server.BehindProxy = behindProxy
-	_, err := server.Start(addr)
+func runMatchmaker(addr, stunAddr string, behindProxy bool) {
+	mm := NewMatchmaker()
+	mm.BehindProxy = behindProxy
+	err := mm.Start(addr, stunAddr)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error starting signalling server: %v\n", err)
+		fmt.Fprintf(os.Stderr, "❌ Error starting matchmaker server: %v\n", err)
 		os.Exit(1)
 	}
 	select {}

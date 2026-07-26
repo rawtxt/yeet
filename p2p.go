@@ -1,26 +1,58 @@
 package main
 
 import (
+	"fmt"
 	"net"
+	"net/url"
+	"strings"
 
 	"github.com/pion/webrtc/v4"
 )
 
 const DataChannelLabel = "yeet-channel"
 
-const YeetSignallingServer = "https://yeet-server.fly.dev"
+const YeetMatchmakerServer = "https://yeet-server.fly.dev"
+const YeetSignallingServer = YeetMatchmakerServer
 
-func WebRTCConfig(useSTUN bool) webrtc.Configuration {
+func WebRTCConfig(useSTUN bool, stunURLs ...string) webrtc.Configuration {
 	if !useSTUN {
 		return webrtc.Configuration{
 			ICEServers: []webrtc.ICEServer{},
 		}
 	}
+	var validURLs []string
+	for _, u := range stunURLs {
+		if u != "" {
+			validURLs = append(validURLs, u)
+		}
+	}
+	if len(validURLs) == 0 {
+		validURLs = []string{"stun:stun.l.google.com:19302"}
+	}
 	return webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
-			webrtc.ICEServer{URLs: []string{"stun:stun.l.google.com:19302"}},
+			{URLs: validURLs},
 		},
 	}
+}
+
+func resolveStunURL(stunURLStr, serverURL string) string {
+	if stunURLStr == "" {
+		return ""
+	}
+	if strings.HasPrefix(stunURLStr, "stun:") {
+		target := strings.TrimPrefix(stunURLStr, "stun:")
+		if !strings.Contains(target, ":") {
+			u, err := url.Parse(serverURL)
+			if err == nil {
+				host := u.Hostname()
+				if host != "" {
+					return fmt.Sprintf("stun:%s:%s", host, target)
+				}
+			}
+		}
+	}
+	return stunURLStr
 }
 
 func GetLocalIP() (string, error) {

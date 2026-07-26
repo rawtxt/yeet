@@ -27,6 +27,8 @@ type SignallingServer struct {
 	Silent       bool
 	MaxSessions  int
 	BehindProxy  bool
+	StunURL      string
+	listener     net.Listener
 }
 
 func NewSignallingServer() *SignallingServer {
@@ -77,6 +79,7 @@ func (s *SignallingServer) Start(addr string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	s.listener = listener
 
 	actualAddr := listener.Addr().String()
 	s.logf("Signalling server starting on %s\n", actualAddr)
@@ -86,6 +89,13 @@ func (s *SignallingServer) Start(addr string) (string, error) {
 	}()
 
 	return actualAddr, nil
+}
+
+func (s *SignallingServer) Close() error {
+	if s.listener != nil {
+		return s.listener.Close()
+	}
+	return nil
 }
 
 func (s *SignallingServer) Reap() int {
@@ -123,8 +133,12 @@ func (s *SignallingServer) reapExpiredSessions() {
 }
 
 func (s *SignallingServer) handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
+	w.Header().Set("Content-Type", "application/json")
+	res := map[string]string{"status": "OK"}
+	if s.StunURL != "" {
+		res["stun_server"] = s.StunURL
+	}
+	json.NewEncoder(w).Encode(res)
 }
 
 func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request) {

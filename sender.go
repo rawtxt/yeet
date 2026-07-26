@@ -114,10 +114,23 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 		return nil, fmt.Errorf("NewSender: failed to parse response: %w", err)
 	}
 
+	stunURL := ""
+	if useSTUN {
+		if healthResp, err := client.Get(serverURL + "/health"); err == nil {
+			defer healthResp.Body.Close()
+			var hres struct {
+				StunServer string `json:"stun_server"`
+			}
+			if json.NewDecoder(healthResp.Body).Decode(&hres) == nil && hres.StunServer != "" {
+				stunURL = resolveStunURL(hres.StunServer, serverURL)
+			}
+		}
+	}
+
 	se := webrtc.SettingEngine{}
 	se.SetSCTPMaxReceiveBufferSize(16 * 1024 * 1024) // 16 MB
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(se))
-	pc, err := api.NewPeerConnection(WebRTCConfig(useSTUN))
+	pc, err := api.NewPeerConnection(WebRTCConfig(useSTUN, stunURL))
 	if err != nil {
 		return nil, fmt.Errorf("NewSender: %w", err)
 	}
