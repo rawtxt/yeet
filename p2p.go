@@ -15,6 +15,15 @@ const YeetMatchmakerServer = "https://yeet-server.fly.dev"
 const YeetSignallingServer = YeetMatchmakerServer
 const DefaultReceiverPort = "8338"
 
+type ProgressFunc func(fileName string, currentBytes, totalBytes int64)
+
+const (
+	EventConnected           = "connected"
+	EventSenderRequestPrefix = "sender_request "
+	EventSenderAnswerPrefix  = "sender_answer "
+	ControlDone              = "done"
+)
+
 func FormatReceiverURL(receiverIP string) string {
 	receiverIP = strings.TrimSpace(receiverIP)
 	if strings.HasPrefix(receiverIP, "http://") || strings.HasPrefix(receiverIP, "https://") {
@@ -53,8 +62,8 @@ func resolveStunURL(stunURLStr, serverURL string) string {
 	if stunURLStr == "" {
 		return ""
 	}
-	if strings.HasPrefix(stunURLStr, "stun:") {
-		target := strings.TrimPrefix(stunURLStr, "stun:")
+	if after, ok := strings.CutPrefix(stunURLStr, "stun:"); ok {
+		target := after
 		if !strings.Contains(target, ":") {
 			u, err := url.Parse(serverURL)
 			if err == nil {

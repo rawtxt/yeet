@@ -229,7 +229,7 @@ func (s *SignallingServer) handleEvents(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Notify receiver that the stream is open
-	fmt.Fprintf(w, "data: connected\n\n")
+	fmt.Fprintf(w, "data: %s\n\n", EventConnected)
 	flusher.Flush()
 
 	s.logf("[Server] Session %s opened SSE stream\n", sessionID)
@@ -292,7 +292,7 @@ func (s *SignallingServer) handleConnect(w http.ResponseWriter, r *http.Request)
 
 	// Notify receiver that a sender wants to connect (include sender name)
 	select {
-	case session.EventChan <- fmt.Sprintf("sender_request %s", req.SenderName):
+	case session.EventChan <- fmt.Sprintf("%s%s", EventSenderRequestPrefix, req.SenderName):
 	default:
 		s.logf("[Server] Warning: session %s event channel full\n", sessionID)
 	}
@@ -392,7 +392,7 @@ func (s *SignallingServer) handleAnswer(w http.ResponseWriter, r *http.Request) 
 	s.logf("[Server] Forwarding sender's answer token to session %s\n", sessionID)
 
 	select {
-	case session.EventChan <- fmt.Sprintf("sender_answer %s", req.SenderToken):
+	case session.EventChan <- fmt.Sprintf("%s%s", EventSenderAnswerPrefix, req.SenderToken):
 	default:
 		s.logf("[Server] Warning: session %s event channel full\n", sessionID)
 	}

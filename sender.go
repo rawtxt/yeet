@@ -23,6 +23,13 @@ type Sender struct {
 	pc               *webrtc.PeerConnection
 	dc               *webrtc.DataChannel
 	dataChannelReady chan struct{}
+	OnProgress       ProgressFunc
+}
+
+func (s *Sender) notifyProgress(filename string, current, total int64) {
+	if s.OnProgress != nil {
+		s.OnProgress(filename, current, total)
+	}
 }
 
 func DiscoverLocalServer(sessionID string) (string, error) {
@@ -228,9 +235,7 @@ func (s *Sender) Send(filename string) error {
 	}
 
 	baseName := filepath.Base(filename)
-	// log.Printf("Preparing to send %q (%d bytes)\n", baseName, stat.Size())
-
-	fmt.Printf("📤 Yeeting %s... 0.0%% (0 B / %s)\033[K", truncateString(baseName, 40), formatSize(stat.Size()))
+	s.notifyProgress(baseName, 0, stat.Size())
 
 	acceptanceWaiter := make(chan struct{})
 	s.dc.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -285,9 +290,7 @@ func (s *Sender) Send(filename string) error {
 				return fmt.Errorf("Send: failed to send chunk: %w", err)
 			}
 			totalSent += int64(n)
-			percent := float64(totalSent) / float64(stat.Size()) * 100
-			fmt.Printf("\r📤 Yeeting %s... %.1f%% (%s / %s)\033[K", truncateString(baseName, 40), percent, formatSize(totalSent), formatSize(stat.Size()))
-			// log.Printf("Progress: %d / %d bytes sent (%.2f%%)\n", totalSent, stat.Size(), float64(totalSent)/float64(stat.Size())*100)
+			s.notifyProgress(baseName, totalSent, stat.Size())
 		}
 		if err != nil {
 			if err == io.EOF {
@@ -301,7 +304,7 @@ func (s *Sender) Send(filename string) error {
 
 	doneWaiter := make(chan struct{})
 	s.dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-		if msg.IsString && string(msg.Data) == "done" {
+		if msg.IsString && string(msg.Data) == ControlDone {
 			// log.Println("Receiver confirmed receipt of all bytes.")
 			close(doneWaiter)
 		}
@@ -309,7 +312,7 @@ func (s *Sender) Send(filename string) error {
 
 	select {
 	case <-doneWaiter:
-		fmt.Printf("\r✨ %s (%s) yeeted successfully!\033[K\n", baseName, formatSize(stat.Size()))
+		s.notifyProgress(baseName, stat.Size(), stat.Size())
 	case <-time.After(15 * time.Second):
 		return fmt.Errorf("Send: timed out waiting for receiver completion acknowledgment")
 	}

@@ -30,7 +30,6 @@ type Receiver struct {
 	mu                  sync.Mutex
 	activeFile          *os.File
 	activeFileName      string
-	activeFileSavedName string
 	bytesRemaining      int64
 	totalBytes          int64
 	doneChan            chan error
@@ -38,10 +37,18 @@ type Receiver struct {
 	senderRequestChan chan string
 	senderAnswerChan  chan string
 
-	localServer    *SignallingServer
-	mdnsServer     *mdns.Server
-	LocalServerURL string
+	localServer     *SignallingServer
+	mdnsServer      *mdns.Server
+	LocalServerURL  string
 	activeServerURL string
+
+	OnProgress ProgressFunc
+}
+
+func (r *Receiver) notifyProgress(filename string, current, total int64) {
+	if r.OnProgress != nil {
+		r.OnProgress(filename, current, total)
+	}
 }
 
 func NewReceiver(serverURL string) (*Receiver, error) {
@@ -226,11 +233,10 @@ func (r *Receiver) Accept(tr TransferRequest) error {
 	}
 	r.activeFile = file
 	r.activeFileName = tr.FileName
-	r.activeFileSavedName = outName
 	r.bytesRemaining = int64(tr.Size)
 	r.totalBytes = int64(tr.Size)
 
-	fmt.Printf("📥 Downloading %s... 0.0%% (0 B / %s)\033[K", truncateString(tr.FileName, 40), formatSize(int64(tr.Size)))
+	r.notifyProgress(tr.FileName, 0, int64(tr.Size))
 
 	// log.Printf("Accepting transfer of %q (%d bytes) as %q\n", tr.FileName, tr.Size, outName)
 	return r.dc.SendText(fmt.Sprintf("accept %q", tr.FileName))
@@ -285,11 +291,11 @@ func (r *Receiver) listenToEvents(serverURL string) {
 		line := scanner.Text()
 		if after, ok := strings.CutPrefix(line, "data: "); ok {
 			data := after
-			if data == "connected" {
+			if data == EventConnected {
 				continue
 			}
 
-			if after, ok := strings.CutPrefix(data, "sender_request "); ok {
+			if after, ok := strings.CutPrefix(data, EventSenderRequestPrefix); ok {
 				senderName := after
 				r.mu.Lock()
 				r.activeServerURL = serverURL
@@ -298,7 +304,7 @@ func (r *Receiver) listenToEvents(serverURL string) {
 				case r.senderRequestChan <- senderName:
 				default:
 				}
-			} else if after, ok := strings.CutPrefix(data, "sender_answer "); ok {
+			} else if after, ok := strings.CutPrefix(data, EventSenderAnswerPrefix); ok {
 				senderToken := after
 				select {
 				case r.senderAnswerChan <- senderToken:
@@ -420,7 +426,6 @@ func (r *Receiver) setupDataChannel() error {
 			remaining := r.bytesRemaining
 			total := r.totalBytes
 			fileName := r.activeFileName
-			savedName := r.activeFileSavedName
 			if remaining <= 0 {
 				r.activeFile.Close()
 				r.activeFile = nil
@@ -428,13 +433,10 @@ func (r *Receiver) setupDataChannel() error {
 			r.mu.Unlock()
 
 			written := total - remaining
-			percent := float64(written) / float64(total) * 100
-			fmt.Printf("\r📥 Downloading %s... %.1f%% (%s / %s)\033[K", truncateString(fileName, 40), percent, formatSize(written), formatSize(total))
+			r.notifyProgress(fileName, written, total)
 
 			if remaining <= 0 {
-				fmt.Printf("\r✨ %s received successfully! Saved as %s\033[K\n", fileName, savedName)
-				// log.Printf("Transfer complete! Received all bytes. Sending completion acknowledgment...\n")
-				if err := r.dc.SendText("done"); err != nil {
+				if err := r.dc.SendText(ControlDone); err != nil {
 					// log.Printf("Warning: failed to send completion acknowledgment: %v\n", err)
 				}
 

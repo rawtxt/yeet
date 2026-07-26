@@ -83,6 +83,18 @@ func runSend(serverURL, receiverIP string, filenames []string) {
 	}
 	defer sender.Close()
 
+	sender.OnProgress = func(fileName string, current, total int64) {
+		if total <= 0 {
+			return
+		}
+		if current >= total {
+			fmt.Printf("\r✨ %s (%s) yeeted successfully!\033[K\n", fileName, formatSize(total))
+			return
+		}
+		percent := float64(current) / float64(total) * 100
+		fmt.Printf("\r📤 Yeeting %s... %.1f%% (%s / %s)\033[K", truncateString(fileName, 40), percent, formatSize(current), formatSize(total))
+	}
+
 	if receiverIP != "" {
 		fmt.Printf("🔗 Connected directly to receiver at %s! Handshaking...\n", serverURL)
 	} else {
@@ -104,6 +116,18 @@ func runReceive(serverURL string) {
 		os.Exit(1)
 	}
 	defer receiver.Close()
+
+	receiver.OnProgress = func(fileName string, current, total int64) {
+		if total <= 0 {
+			return
+		}
+		if current >= total {
+			fmt.Printf("\r✨ %s received successfully!\033[K\n", fileName)
+			return
+		}
+		percent := float64(current) / float64(total) * 100
+		fmt.Printf("\r📥 Downloading %s... %.1f%% (%s / %s)\033[K", truncateString(fileName, 40), percent, formatSize(current), formatSize(total))
+	}
 
 	fmt.Printf("Your Session ID: %s\n", receiver.SessionID)
 	if localIP, err := GetLocalIP(); err == nil && localIP != "127.0.0.1" {
