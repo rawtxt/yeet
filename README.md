@@ -30,12 +30,13 @@ yeet
 
 *Output:*
 ```text
-🚀 Your Session ID: alert-aware-bacon
-⏳ Waiting for a sender to connect...
+Your Session ID: alert-aware-bacon
+Local IP: 192.168.1.50
+Waiting for a sender to connect...
 ```
 
 ### Send
-Yeet your file directly to your friend by specifying its name and typing in their 3-word phrase code:
+Yeet files directly to your receiver by specifying filenames:
 
 ```bash
 yeet cat.jpg book.pdf
@@ -47,15 +48,38 @@ Enter Session ID: alert-aware-bacon
 🔗 Connected to signalling server! Handshaking with receiver...
 ```
 
-### Custom Signalling Node
-You can run your own signalling node:
+### Direct IP / LAN Transfer
+Connect directly to a receiver's IP address on the local network (bypassing the public matchmaker):
 
 ```bash
-yeet -signalling -addr :8080
+yeet -receiver-ip 192.168.1.50 cat.jpg
 ```
 
-To point your clients to a custom signalling node:
+### Self-Hosted Matchmaker Server
+You can run your own combined matchmaking server (signalling HTTP server + STUN UDP server):
 
 ```bash
-yeet -server http://localhost:8080 [file]
+yeet -run-matchmaker -addr :8080 -stun-addr :3478
 ```
+
+To point your sender or receiver to a custom matchmaker server:
+
+```bash
+# Receive using custom matchmaker
+yeet -matchmaker http://localhost:8080
+
+# Send using custom matchmaker
+yeet -matchmaker http://localhost:8080 file.zip
+```
+
+## CLI Flags
+
+| Flag | Description | Default |
+| --- | --- | --- |
+| `-run-matchmaker` | Start self-hosted matchmaker server (signalling + STUN) | `false` |
+| `-matchmaker <url>` | Custom matchmaker server URL | `https://yeet-server.fly.dev` |
+| `-receiver-ip <ip_addr>` | Connect directly to receiver IP address (bypasses external matchmaker) | `""` |
+| `-addr <addr>` | Address for matchmaker HTTP server to listen on | `:8080` |
+| `-stun-addr <addr>` | Address for matchmaker STUN server to listen on (UDP) | `:3478` |
+| `-behind-proxy` | Trust proxy headers for rate limiting (`X-Forwarded-For`, `X-Real-IP`) | `false` |
+
