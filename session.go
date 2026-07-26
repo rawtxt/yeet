@@ -61,9 +61,10 @@ var sessionWords = []string{
 }
 
 func generateSessionID() SessionID {
-	word1 := sessionWords[mrand.IntN(256)]
-	word2 := sessionWords[mrand.IntN(256)]
-	word3 := sessionWords[mrand.IntN(256)]
+	n := len(sessionWords)
+	word1 := sessionWords[mrand.IntN(n)]
+	word2 := sessionWords[mrand.IntN(n)]
+	word3 := sessionWords[mrand.IntN(n)]
 	return SessionID(fmt.Sprintf("%s-%s-%s", word1, word2, word3))
 }
 
