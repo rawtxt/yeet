@@ -49,6 +49,12 @@ Enter Session ID: alert-aware-bacon
 ```
 
 ### Direct IP / LAN Transfer
+To receive files directly without registering with any external matchmaker server:
+
+```bash
+yeet -no-matchmaker
+```
+
 Connect directly to a receiver's IP address on the local network (bypassing the public matchmaker):
 
 ```bash
@@ -78,6 +84,7 @@ yeet -matchmaker http://localhost:8080 file.zip
 | --- | --- | --- |
 | `-run-matchmaker` | Start self-hosted matchmaker server (signalling + STUN) | `false` |
 | `-matchmaker <url>` | Custom matchmaker server URL | `https://yeet-server.fly.dev` |
+| `-no-matchmaker` | Do not connect to external matchmaker server (listen locally for direct IP/LAN transfers only) | `false` |
 | `-receiver-ip <ip_addr>` | Connect directly to receiver IP address (bypasses external matchmaker) | `""` |
 | `-addr <addr>` | Address for matchmaker HTTP server to listen on | `:8080` |
 | `-stun-addr <addr>` | Address for matchmaker STUN server to listen on (UDP) | `:3478` |

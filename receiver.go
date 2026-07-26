@@ -56,14 +56,18 @@ func (r *Receiver) notifyProgress(filename string, current, total int64) {
 func NewReceiver(serverURL string) (*Receiver, error) {
 	useSTUN := true
 	stunURL := ""
-	client := http.Client{Timeout: 500 * time.Millisecond}
-	if resp, err := client.Get(serverURL + "/health"); err == nil {
-		defer resp.Body.Close()
-		var hres struct {
-			StunServer string `json:"stun_server"`
-		}
-		if json.NewDecoder(resp.Body).Decode(&hres) == nil && hres.StunServer != "" {
-			stunURL = resolveStunURL(hres.StunServer, serverURL)
+	if serverURL != "" {
+		client := http.Client{Timeout: 500 * time.Millisecond}
+		if resp, err := client.Get(serverURL + "/health"); err == nil {
+			defer resp.Body.Close()
+			var hres struct {
+				StunServer string `json:"stun_server"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&hres) == nil && hres.StunServer != "" {
+				stunURL = resolveStunURL(hres.StunServer, serverURL)
+			}
+		} else {
+			useSTUN = false
 		}
 	} else {
 		useSTUN = false
@@ -245,6 +249,9 @@ func (r *Receiver) Accept(tr TransferRequest) error {
 }
 
 func (r *Receiver) registerSession() error {
+	if r.serverURL == "" {
+		return fmt.Errorf("no matchmaker server configured")
+	}
 	localToken, err := r.LocalToken()
 	if err != nil {
 		return err

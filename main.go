@@ -13,6 +13,7 @@ import (
 func main() {
 	runMatchmakerFlag := flag.Bool("run-matchmaker", false, "Start self-hosted matchmaker server (signalling + STUN)")
 	matchmakerURL := flag.String("matchmaker", YeetMatchmakerServer, "Custom matchmaker server URL")
+	noMatchmakerFlag := flag.Bool("no-matchmaker", false, "Do not connect to external matchmaker server (listen locally for direct IP/LAN transfers only)")
 	receiverIPFlag := flag.String("receiver-ip", "", "Connect directly to receiver IP address (bypasses external matchmaker)")
 	addr := flag.String("addr", ":8080", "Address for matchmaker HTTP server to listen on")
 	stunAddr := flag.String("stun-addr", ":3478", "Address for matchmaker STUN server to listen on (UDP)")
@@ -21,7 +22,7 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(flag.CommandLine.Output(), "To receive a file:\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-matchmaker <url>]\n\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-matchmaker <url>] [-no-matchmaker]\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(flag.CommandLine.Output(), "To send files:\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  %s [-matchmaker <url>] [-receiver-ip <ip_addr>] <filename1> [<filename2> ...]\n\n", filepath.Base(os.Args[0]))
 		fmt.Fprintf(flag.CommandLine.Output(), "To start a self-hosted match-making server (signalling + STUN):\n")
@@ -37,9 +38,14 @@ func main() {
 		return
 	}
 
-	serverURL := *matchmakerURL
-	if serverURL == "" {
-		serverURL = YeetMatchmakerServer
+	var serverURL string
+	if *noMatchmakerFlag {
+		serverURL = ""
+	} else {
+		serverURL = *matchmakerURL
+		if serverURL == "" {
+			serverURL = YeetMatchmakerServer
+		}
 	}
 
 	args := flag.Args()

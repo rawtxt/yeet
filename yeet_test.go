@@ -704,3 +704,18 @@ func TestP2PFileTransferDirectIP(t *testing.T) {
 		t.Errorf("content mismatch!\nExpected: %q\nGot:      %q", content, destContent)
 	}
 }
+
+func TestNoMatchmakerReceiver(t *testing.T) {
+	receiver, err := NewReceiver("")
+	if err != nil {
+		t.Fatalf("failed to create receiver with empty matchmaker URL: %v", err)
+	}
+	defer receiver.Close()
+
+	if receiver.SessionID == "" {
+		t.Errorf("expected session ID to be generated locally, got empty string")
+	}
+	if receiver.LocalServerURL == "" {
+		t.Errorf("expected LocalServerURL to be populated")
+	}
+}
