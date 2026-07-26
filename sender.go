@@ -18,6 +18,7 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
+// Sender manages outgoing WebRTC connection and file transfer to a Receiver.
 type Sender struct {
 	SessionID        SessionID
 	pc               *webrtc.PeerConnection
@@ -32,6 +33,7 @@ func (s *Sender) notifyProgress(filename string, current, total int64) {
 	}
 }
 
+// DiscoverLocalServer searches for an active receiver on the local network via mDNS.
 func DiscoverLocalServer(sessionID string) (string, error) {
 	entriesCh := make(chan *mdns.ServiceEntry, 4)
 	go func() {
@@ -54,6 +56,7 @@ func DiscoverLocalServer(sessionID string) (string, error) {
 	return "", fmt.Errorf("local server not found")
 }
 
+// NewSender connects to the signalling server for sessionID and establishes a WebRTC PeerConnection.
 func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 	u, err := user.Current()
 	var username string
@@ -149,7 +152,6 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 	}
 
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
-		// log.Println("Received Data Channel", dc.Label())
 		s.dc = dc
 		close(s.dataChannelReady)
 	})
@@ -176,7 +178,6 @@ func NewSender(serverURL string, sessionID SessionID) (*Sender, error) {
 	case <-time.After(2 * time.Second):
 	}
 
-	// log.Println("Submitting connection answer to signalling server...")
 	localAnswer, err := s.LocalToken()
 	if err != nil {
 		return nil, fmt.Errorf("NewSender: failed to encode local token: %w", err)
@@ -214,11 +215,10 @@ func (s *Sender) Close() {
 	}
 }
 
+// Send transmits a local file to the receiver over the WebRTC DataChannel.
 func (s *Sender) Send(filename string) error {
-	// log.Println("Waiting for PeerConnection to establish data channel...")
 	select {
 	case <-s.dataChannelReady:
-		// log.Println("Data channel established successfully!")
 	case <-time.After(30 * time.Second):
 		return fmt.Errorf("Send: timed out waiting for connection from receiver")
 	}
@@ -255,13 +255,11 @@ func (s *Sender) Send(filename string) error {
 		return fmt.Errorf("Send: %w", err)
 	}
 
-	// log.Println("Sending transfer request to receiver")
 	if err := s.dc.SendText(string(bytes)); err != nil {
 		return fmt.Errorf("Send: %w", err)
 	}
 
 	<-acceptanceWaiter
-	// log.Printf("Got approval from receiver to send %q\n", baseName)
 
 	bufferedAmountLowChan := make(chan struct{}, 1)
 	s.dc.SetBufferedAmountLowThreshold(512 * 1024) // 512 KB
@@ -300,12 +298,9 @@ func (s *Sender) Send(filename string) error {
 		}
 	}
 
-	// log.Println("File sent completely! Waiting for receiver confirmation...")
-
 	doneWaiter := make(chan struct{})
 	s.dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 		if msg.IsString && string(msg.Data) == ControlDone {
-			// log.Println("Receiver confirmed receipt of all bytes.")
 			close(doneWaiter)
 		}
 	})

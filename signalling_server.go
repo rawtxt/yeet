@@ -14,16 +14,23 @@ import (
 	"unicode"
 )
 
+const (
+	MaxRegisterBodyBytes = 10240
+	MaxConnectBodyBytes  = 4096
+)
+
 type rateLimiter struct {
 	tokens     float64
 	lastRefill time.Time
 	lastActive time.Time
 }
 
+// SignallingServer manages P2P WebRTC session matchmaking.
 type SignallingServer struct {
 	mu           sync.Mutex
 	sessions     map[SessionID]*Session
 	rateLimiters map[string]*rateLimiter
+	stopChan     chan struct{}
 	Silent       bool
 	MaxSessions  int
 	BehindProxy  bool
@@ -31,10 +38,12 @@ type SignallingServer struct {
 	listener     net.Listener
 }
 
+// NewSignallingServer creates a new SignallingServer instance.
 func NewSignallingServer() *SignallingServer {
 	return &SignallingServer{
 		sessions:     make(map[SessionID]*Session),
 		rateLimiters: make(map[string]*rateLimiter),
+		stopChan:     make(chan struct{}),
 		MaxSessions:  10000,
 	}
 }
@@ -45,6 +54,7 @@ func (s *SignallingServer) logf(format string, v ...any) {
 	}
 }
 
+// AddSession manually inserts a session into the server's session table.
 func (s *SignallingServer) AddSession(sessionID SessionID, secretToken, receiverToken string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -63,8 +73,8 @@ func (s *SignallingServer) addSessionLocked(sessionID SessionID, secretToken, re
 	s.sessions[sessionID] = session
 }
 
+// Start listens on the given TCP address and runs the HTTP server.
 func (s *SignallingServer) Start(addr string) (string, error) {
-	// Start background janitor to clean up expired sessions
 	go s.reapExpiredSessions()
 
 	mux := http.NewServeMux()
@@ -91,13 +101,20 @@ func (s *SignallingServer) Start(addr string) (string, error) {
 	return actualAddr, nil
 }
 
+// Close stops the HTTP listener and background cleanup worker.
 func (s *SignallingServer) Close() error {
+	select {
+	case <-s.stopChan:
+	default:
+		close(s.stopChan)
+	}
 	if s.listener != nil {
 		return s.listener.Close()
 	}
 	return nil
 }
 
+// Reap sweeps expired sessions and inactive rate limiter tokens. Returns the number of sessions reaped.
 func (s *SignallingServer) Reap() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -112,7 +129,6 @@ func (s *SignallingServer) Reap() int {
 		}
 	}
 
-	// Clean up inactive rate limiters (inactive for more than 10 minutes)
 	for ip, rl := range s.rateLimiters {
 		if now.Sub(rl.lastActive) > 10*time.Minute {
 			delete(s.rateLimiters, ip)
@@ -124,10 +140,16 @@ func (s *SignallingServer) Reap() int {
 
 func (s *SignallingServer) reapExpiredSessions() {
 	ticker := time.NewTicker(1 * time.Minute)
-	for range ticker.C {
-		reapedCount := s.Reap()
-		if reapedCount > 0 {
-			s.logf("[Server] Cleaned up %d expired sessions\n", reapedCount)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			reapedCount := s.Reap()
+			if reapedCount > 0 {
+				s.logf("[Server] Cleaned up %d expired sessions\n", reapedCount)
+			}
+		case <-s.stopChan:
+			return
 		}
 	}
 }
@@ -154,7 +176,7 @@ func (s *SignallingServer) handleRegister(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 10240)
+	r.Body = http.MaxBytesReader(w, r.Body, MaxRegisterBodyBytes)
 
 	var req struct {
 		ReceiverToken string `json:"receiver_token"`
@@ -258,7 +280,7 @@ func (s *SignallingServer) handleConnect(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	r.Body = http.MaxBytesReader(w, r.Body, MaxConnectBodyBytes)
 
 	sessionID := r.URL.Query().Get("session_id")
 	if sessionID == "" {
@@ -363,7 +385,7 @@ func (s *SignallingServer) handleAnswer(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 10240)
+	r.Body = http.MaxBytesReader(w, r.Body, MaxRegisterBodyBytes)
 
 	sessionID := r.URL.Query().Get("session_id")
 	if sessionID == "" {

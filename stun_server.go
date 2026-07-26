@@ -11,6 +11,7 @@ import (
 	"github.com/pion/stun/v3"
 )
 
+// STUNServer runs a lightweight UDP STUN binding server.
 type STUNServer struct {
 	addr      string
 	conn      *net.UDPConn
@@ -20,6 +21,7 @@ type STUNServer struct {
 	Silent    bool
 }
 
+// NewSTUNServer initializes a new STUNServer instance.
 func NewSTUNServer() *STUNServer {
 	return &STUNServer{
 		closeChan: make(chan struct{}),
@@ -32,6 +34,7 @@ func (s *STUNServer) logf(format string, v ...any) {
 	}
 }
 
+// Start binds to the UDP address and starts listening for STUN binding requests.
 func (s *STUNServer) Start(addr string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
