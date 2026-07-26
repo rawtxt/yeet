@@ -4,6 +4,7 @@ go 1.26.4
 
 require (
 	github.com/hashicorp/mdns v1.0.7
+	github.com/pion/stun/v3 v3.1.5
 	github.com/pion/webrtc/v4 v4.2.15
 )
 
@@ -22,7 +23,6 @@ require (
 	github.com/pion/sctp v1.10.0 // indirect
 	github.com/pion/sdp/v3 v3.0.18 // indirect
 	github.com/pion/srtp/v3 v3.0.11 // indirect
-	github.com/pion/stun/v3 v3.1.5 // indirect
 	github.com/pion/transport/v4 v4.0.2 // indirect
 	github.com/pion/turn/v5 v5.0.9 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect

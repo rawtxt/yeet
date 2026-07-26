@@ -20,6 +20,7 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
+// Receiver registers a session and receives files over WebRTC DataChannel.
 type Receiver struct {
 	SessionID           SessionID
 	SecretToken         string
@@ -51,6 +52,7 @@ func (r *Receiver) notifyProgress(filename string, current, total int64) {
 	}
 }
 
+// NewReceiver creates a new Receiver instance and registers a session on the signalling server.
 func NewReceiver(serverURL string) (*Receiver, error) {
 	useSTUN := true
 	stunURL := ""
@@ -160,9 +162,6 @@ func NewReceiver(serverURL string) (*Receiver, error) {
 			})
 			if err == nil {
 				r.mdnsServer = mdnsServer
-				// log.Printf("dbg: Started local mDNS server advertising %s._yeet._tcp on port %d\n", r.SessionID, port)
-			} else {
-				// log.Printf("dbg: Failed to start local mDNS server: %v\n", err)
 			}
 		}
 	}
@@ -174,6 +173,7 @@ func (r *Receiver) LocalToken() (string, error) {
 	return encodeSDP(*r.pc.LocalDescription())
 }
 
+// Connect processes the sender's answer SDP token and establishes the WebRTC PeerConnection.
 func (r *Receiver) Connect(senderToken string) error {
 	desc, err := decodeSDP(senderToken)
 	if err != nil {
@@ -182,6 +182,7 @@ func (r *Receiver) Connect(senderToken string) error {
 	return r.pc.SetRemoteDescription(desc)
 }
 
+// Close terminates active files, channels, WebRTC connections, and mDNS services.
 func (r *Receiver) Close() {
 	r.mu.Lock()
 	if r.activeFile != nil {
@@ -218,6 +219,7 @@ func (r *Receiver) SenderAnswer() <-chan string {
 	return r.senderAnswerChan
 }
 
+// Accept confirms a TransferRequest and prepares the output file to receive incoming chunks.
 func (r *Receiver) Accept(tr TransferRequest) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -312,6 +314,10 @@ func (r *Receiver) listenToEvents(serverURL string) {
 				}
 			}
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		// Event stream disconnected or encountered a read error
+		return
 	}
 }
 

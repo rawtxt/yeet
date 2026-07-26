@@ -5,6 +5,7 @@ import (
 	"net"
 )
 
+// Matchmaker orchestrates both the HTTP Signalling server and UDP STUN server in a unified self-hosted service.
 type Matchmaker struct {
 	SignallingServer *SignallingServer
 	STUNServer       *STUNServer
@@ -14,6 +15,7 @@ type Matchmaker struct {
 	Silent           bool
 }
 
+// NewMatchmaker initializes a new Matchmaker containing a Signalling server and STUN server.
 func NewMatchmaker() *Matchmaker {
 	return &Matchmaker{
 		SignallingServer: NewSignallingServer(),
@@ -21,6 +23,7 @@ func NewMatchmaker() *Matchmaker {
 	}
 }
 
+// Start launches both the STUN server and HTTP Signalling server.
 func (m *Matchmaker) Start(signallingAddr, stunAddr string) error {
 	m.SignallingServer.Silent = m.Silent
 	m.SignallingServer.BehindProxy = m.BehindProxy
